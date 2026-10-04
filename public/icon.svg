@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#09090b" />
+      <stop offset="50%" stop-color="#18181b" />
+      <stop offset="100%" stop-color="#030712" />
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="50%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fb7185" />
+      <stop offset="100%" stop-color="#c084fc" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Squircle -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="#27272a" stroke-width="6" />
+
+  <!-- Outer Neon Ring Glow -->
+  <rect x="40" y="40" width="432" height="432" rx="88" fill="none" stroke="url(#glowGrad)" stroke-width="4" opacity="0.4" filter="url(#glow)" />
+
+  <!-- Film Reel / Studio Frame Icon -->
+  <g transform="translate(106, 106) scale(0.585)">
+    <!-- Main Reel Center -->
+    <circle cx="256" cy="256" r="170" fill="none" stroke="url(#glowGrad)" stroke-width="32" stroke-linecap="round" />
+    <circle cx="256" cy="256" r="60" fill="url(#accentGrad)" />
+
+    <!-- Play Triangle Inside Center -->
+    <polygon points="246,232 278,256 246,280" fill="#ffffff" />
+
+    <!-- 8s Loop Orbit Indicator -->
+    <path d="M 120,256 A 136,136 0 1,1 392,256 A 136,136 0 1,1 120,256" fill="none" stroke="#ffffff" stroke-width="12" stroke-dasharray="36 28" opacity="0.85" />
+
+    <!-- 4 Accent Spokes -->
+    <circle cx="256" cy="120" r="18" fill="#f43f5e" />
+    <circle cx="392" cy="256" r="18" fill="#a855f7" />
+    <circle cx="256" cy="392" r="18" fill="#06b6d4" />
+    <circle cx="120" cy="256" r="18" fill="#38bdf8" />
+  </g>
+
+  <!-- Brand Typography "SX" in Bold Studio Font -->
+  <text x="256" y="432" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="900" font-size="44" fill="#ffffff" letter-spacing="4">
+    SHORT<tspan fill="url(#accentGrad)">X</tspan>
+  </text>
+</svg>
