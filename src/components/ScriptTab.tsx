@@ -37,6 +37,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [selectedText, setSelectedText] = useState<string>('');
+  const [activeWordForColor, setActiveWordForColor] = useState<string | null>(null);
   const [newKeywordInput, setNewKeywordInput] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -44,6 +45,17 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
   const [selectedStyleCategory, setSelectedStyleCategory] = useState<
     'All' | 'Viral & Shorts' | 'Urdu & Calligraphy' | 'Cinema & Luxury' | 'Cyber & Creative'
   >('All');
+
+  const QUICK_PALETTE = [
+    { color: '#ef4444', name: 'Viral Red', emoji: '🔴' },
+    { color: '#facc15', name: 'Hyper Yellow', emoji: '🟡' },
+    { color: '#22c55e', name: 'Neon Lime', emoji: '🟢' },
+    { color: '#38bdf8', name: 'Ice Cyan', emoji: '🔵' },
+    { color: '#a855f7', name: 'Electric Purple', emoji: '🟣' },
+    { color: '#f97316', name: 'Vibrant Orange', emoji: '🟠' },
+    { color: '#ec4899', name: 'Hot Pink', emoji: '🌸' },
+    { color: '#ffffff', name: 'Pure White', emoji: '⚪' },
+  ];
 
   const wordCount = script.text.trim().split(/\s+/).filter(Boolean).length;
   const readingSpeedVerdict =
@@ -53,6 +65,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
   const highlightColor = script.highlightColor || '#ef4444';
   const highlightStyle = script.highlightStyle || 'text';
   const customKeywords = script.customKeywords || [];
+  const wordColors = script.wordColors || {};
 
   // Active highlights
   const activeHighlights = getActiveHighlights(
@@ -140,37 +153,88 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
     }
   };
 
-  // Highlight currently selected text
+  // Highlight currently selected text with optional specific color (only this word gets this color!)
   const handleHighlightSelection = (color?: string) => {
     if (!selectedText) return;
-    const clean = selectedText.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').trim();
+    const clean = cleanPunctuation(selectedText);
     if (!clean) return;
 
-    // Switch to manual-only mode so AI auto-detection doesn't highlight other words!
-    const updatedKeywords = Array.from(new Set([...customKeywords, clean]));
+    const targetColor = color || highlightColor || '#ef4444';
+    const nextWordColors = {
+      ...wordColors,
+      [clean]: targetColor,
+    };
+    const updatedKeywords = Array.from(new Set([...customKeywords, selectedText.trim()]));
+    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== clean);
+
     onChange({
       customKeywords: updatedKeywords,
+      wordColors: nextWordColors,
+      excludedKeywords: nextExcluded,
       highlightMode: 'manual-only',
       autoHighlightKeywords: false,
-      ...(color ? { highlightColor: color } : {}),
     });
     setSelectedText('');
+    setActiveWordForColor(null);
   };
 
   // Highlight ONLY this selected word/phrase (clearing any other preset highlights)
   const handleHighlightSelectionOnly = (color?: string) => {
     if (!selectedText) return;
-    const clean = selectedText.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').trim();
+    const clean = cleanPunctuation(selectedText);
     if (!clean) return;
 
+    const targetColor = color || highlightColor || '#ef4444';
     onChange({
-      customKeywords: [clean],
+      customKeywords: [selectedText.trim()],
+      wordColors: { [clean]: targetColor },
       highlightMode: 'manual-only',
       autoHighlightKeywords: false,
       excludedKeywords: [],
-      ...(color ? { highlightColor: color } : {}),
     });
     setSelectedText('');
+    setActiveWordForColor(null);
+  };
+
+  // Assign custom color to a specific word or phrase - only THIS word changes color!
+  const handleSetWordColor = (wordToColor: string, color: string) => {
+    const clean = cleanPunctuation(wordToColor);
+    if (!clean) return;
+
+    const nextWordColors = {
+      ...wordColors,
+      [clean]: color,
+    };
+    const nextCustom = Array.from(new Set([...customKeywords, wordToColor.trim()]));
+    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== clean);
+
+    onChange({
+      customKeywords: nextCustom,
+      wordColors: nextWordColors,
+      excludedKeywords: nextExcluded,
+      highlightMode: 'manual-only',
+      autoHighlightKeywords: false,
+    });
+  };
+
+  // Remove custom color & highlight from a specific word - only this word resets!
+  const handleRemoveWordColor = (wordToRemove: string) => {
+    const clean = cleanPunctuation(wordToRemove);
+    const nextWordColors = { ...wordColors };
+    if (clean) delete nextWordColors[clean];
+
+    const nextCustom = customKeywords.filter((k) => cleanPunctuation(k) !== clean);
+    const nextExcluded = Array.from(new Set([...(script.excludedKeywords || []), clean]));
+
+    onChange({
+      customKeywords: nextCustom,
+      wordColors: nextWordColors,
+      excludedKeywords: nextExcluded,
+    });
+
+    if (activeWordForColor && cleanPunctuation(activeWordForColor) === clean) {
+      setActiveWordForColor(null);
+    }
   };
 
   // Wrap selected text directly with [bracket] syntax in textarea
@@ -197,31 +261,26 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
     }
   };
 
-  // Toggle word highlight via interactive click
-  const handleToggleWordHighlight = (word: string) => {
+  // Toggle word highlight or open its color palette
+  const handleToggleWordHighlight = (word: string, specificColor?: string) => {
     const clean = cleanPunctuation(word);
     if (!clean) return;
 
-    // Check if clean word exists in customKeywords
-    const existingIndex = customKeywords.findIndex((k) => cleanPunctuation(k) === clean);
+    const isAlreadyHighlighted = Boolean(wordColors[clean]) || customKeywords.some((k) => cleanPunctuation(k) === clean);
 
-    if (existingIndex >= 0) {
-      // Remove from custom keywords and add to excluded so AI won't re-highlight it
-      const nextCustom = customKeywords.filter((_, idx) => idx !== existingIndex);
-      const nextExcluded = Array.from(new Set([...(script.excludedKeywords || []), clean]));
-      onChange({
-        customKeywords: nextCustom,
-        excludedKeywords: nextExcluded,
-      });
+    if (isAlreadyHighlighted && !specificColor) {
+      // If already active in color palette, toggle off / remove highlight
+      if (activeWordForColor && cleanPunctuation(activeWordForColor) === clean) {
+        handleRemoveWordColor(word);
+        setActiveWordForColor(null);
+      } else {
+        // Activate word to pick or change its color!
+        setActiveWordForColor(word);
+      }
     } else {
-      // Add to custom keywords and remove from excluded
-      const nextCustom = [...customKeywords, word.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')];
-      const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== clean);
-      onChange({
-        customKeywords: nextCustom,
-        excludedKeywords: nextExcluded,
-        highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
-      });
+      const chosenColor = specificColor || highlightColor || '#ef4444';
+      handleSetWordColor(word, chosenColor);
+      setActiveWordForColor(word);
     }
   };
 
@@ -431,54 +490,82 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
           </div>
         </div>
 
-        {/* Selected Text Quick Action Banner ("sirf selected text ko highlight karein") */}
+        {/* Selected Text Quick Action Banner ("sirf selected text ko highlight karein or color dein") */}
         {selectedText ? (
-          <div className="mb-2 p-2.5 rounded-lg bg-rose-950/40 border border-rose-800/60 flex flex-wrap items-center justify-between gap-2 animate-in fade-in duration-150">
-            <div className="flex items-center gap-2 text-xs overflow-hidden">
-              <Highlighter className="w-4 h-4 text-rose-400 shrink-0" />
-              <span className="text-neutral-300 truncate">
-                Selected: <strong className="text-rose-300 font-semibold underline decoration-rose-500">"{selectedText}"</strong>
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => handleHighlightSelectionOnly()}
-                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-md shadow-sm transition-colors cursor-pointer flex items-center gap-1"
-                title="Baqi sab lafz hata kar sirf is ek lafz ko highlight karein"
-              >
-                <span>Only This Word</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleHighlightSelection()}
-                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs rounded-md shadow-sm transition-colors cursor-pointer flex items-center gap-1"
-                title="Is word ko manual highlights mein add karein"
-              >
-                <span>Highlight Word</span>
-                <Check className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={handleWrapBrackets}
-                className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-mono font-bold text-xs rounded-md border border-neutral-700 transition-colors cursor-pointer"
-                title="Wrap with [ ] brackets in text"
-              >
-                [ ]
-              </button>
+          <div className="mb-2 p-3 rounded-xl bg-neutral-900 border border-rose-500/60 shadow-lg space-y-2 animate-in fade-in duration-150">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs overflow-hidden">
+                <Highlighter className="w-4 h-4 text-rose-400 shrink-0" />
+                <span className="text-neutral-300 truncate">
+                  Selected Word: <strong className="text-rose-300 font-bold underline decoration-rose-500 text-sm">"{selectedText}"</strong>
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={() => setSelectedText('')}
                 className="p-1 text-neutral-400 hover:text-white transition-colors cursor-pointer text-xs"
+                title="Cancel selection"
               >
                 ✕
               </button>
+            </div>
+
+            {/* Quick Color Swatches Bar for Selected Word */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-neutral-800">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-semibold text-neutral-400 mr-1">Choose Color:</span>
+                {QUICK_PALETTE.map((p) => (
+                  <button
+                    key={p.color}
+                    type="button"
+                    onClick={() => handleSetWordColor(selectedText, p.color)}
+                    className="w-6 h-6 rounded-full transition-transform hover:scale-115 active:scale-95 border-2 border-transparent hover:border-white cursor-pointer shadow-sm flex items-center justify-center"
+                    style={{ backgroundColor: p.color }}
+                    title={`Color "${selectedText}" in ${p.name}`}
+                  />
+                ))}
+                <input
+                  type="color"
+                  value={wordColors[cleanPunctuation(selectedText)] || highlightColor}
+                  onChange={(e) => handleSetWordColor(selectedText, e.target.value)}
+                  className="w-6 h-6 rounded-full border border-neutral-700 bg-transparent cursor-pointer ml-0.5"
+                  title="Pick custom color for this word"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleHighlightSelectionOnly()}
+                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-md shadow-sm transition-colors cursor-pointer"
+                  title="Only highlight this word (clear other highlights)"
+                >
+                  Only This Word
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleHighlightSelection()}
+                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs rounded-md shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                  title="Highlight this word"
+                >
+                  <span>Highlight</span>
+                  <Check className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleWrapBrackets}
+                  className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-mono font-bold text-xs rounded-md border border-neutral-700 transition-colors cursor-pointer"
+                  title="Wrap with [ ] brackets in text"
+                >
+                  [ ]
+                </button>
+              </div>
             </div>
           </div>
         ) : (
           <div className="text-[11px] text-neutral-400 mb-1.5 flex items-center gap-1">
             <span>💡</span>
-            <span>Kisi bhi text ya lafz ko mouse se select kar ke foran highlight kar sakte hain!</span>
+            <span>Kisi bhi lafz ko mouse se select karein ya neeche click karein — sirf usi lafz ka color change hoga!</span>
           </div>
         )}
 
@@ -486,12 +573,12 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
           ref={textareaRef}
           rows={6}
           value={script.text}
-          onChange={(e) => onChange({ text: e.target.value })}
+          onChange={(e) => onChange({ text: e.target.value, highlightMode: 'manual-only', autoHighlightKeywords: false })}
           onSelect={handleSelectTextarea}
           onMouseUp={handleSelectTextarea}
           onTouchEnd={handleSelectTextarea}
           onKeyUp={handleSelectTextarea}
-          placeholder="Write your story text here... Select any word to highlight it, or use [brackets] like [German Shepherd] to highlight manually."
+          placeholder="Write or paste your story text here... Select any word to give it any color, or click words below."
           className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-rose-500 transition-colors resize-y leading-relaxed font-sans"
         />
 
@@ -589,29 +676,100 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
           </div>
         </div>
 
-        {/* 2. Interactive Word Highlighter (Click any word to toggle highlight!) */}
+        {/* 2. Interactive Word Highlighter (Click any word to toggle or pick its color!) */}
         {highlightMode !== 'none' && storyTokens.length > 0 && (
-          <div className="space-y-2 pt-2 border-t border-neutral-800/80">
+          <div className="space-y-2.5 pt-2 border-t border-neutral-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-neutral-300 flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-neutral-200 flex items-center gap-1.5">
                 <span>👆</span>
-                <span>Click Words to Highlight / Unhighlight:</span>
+                <span>Click Any Word to Color / Highlight:</span>
               </span>
               <span className="text-[11px] text-neutral-400">
-                Tap any word below
+                {activeWordForColor ? 'Palette open below' : 'Tap any word to choose its color'}
               </span>
             </div>
 
-            <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800 max-h-36 overflow-y-auto flex flex-wrap gap-1.5 leading-relaxed select-none">
+            {/* Active Word Dedicated Color Palette Bar */}
+            {activeWordForColor && (
+              <div className="p-3 bg-neutral-900 border border-rose-500/70 rounded-xl shadow-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-150">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-neutral-200">
+                    Color for: <strong className="text-rose-300 font-bold underline decoration-rose-500 text-sm">"{cleanPunctuation(activeWordForColor)}"</strong>
+                  </span>
+                  {wordColors[cleanPunctuation(activeWordForColor)] && (
+                    <span
+                      className="w-3.5 h-3.5 rounded-full border border-white/60 shadow-sm inline-block"
+                      style={{ backgroundColor: wordColors[cleanPunctuation(activeWordForColor)] }}
+                    />
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-neutral-400 mr-0.5">Pick Color:</span>
+                  {QUICK_PALETTE.map((p) => {
+                    const cleanWord = cleanPunctuation(activeWordForColor);
+                    const isSelectedColor = wordColors[cleanWord]?.toLowerCase() === p.color.toLowerCase();
+                    return (
+                      <button
+                        key={p.color}
+                        type="button"
+                        onClick={() => handleSetWordColor(activeWordForColor, p.color)}
+                        className={`w-6 h-6 rounded-full transition-transform hover:scale-120 active:scale-95 border-2 cursor-pointer flex items-center justify-center shadow-sm ${
+                          isSelectedColor
+                            ? 'border-white scale-110 ring-2 ring-white/40'
+                            : 'border-transparent hover:border-white/60'
+                        }`}
+                        style={{ backgroundColor: p.color }}
+                        title={`${p.name} (${p.color})`}
+                      >
+                        {isSelectedColor && (
+                          <Check className="w-3 h-3 text-black stroke-[3]" />
+                        )}
+                      </button>
+                    );
+                  })}
+                  <input
+                    type="color"
+                    value={wordColors[cleanPunctuation(activeWordForColor)] || highlightColor}
+                    onChange={(e) => handleSetWordColor(activeWordForColor, e.target.value)}
+                    className="w-6 h-6 rounded-full border border-neutral-700 bg-transparent cursor-pointer ml-1"
+                    title="Custom color picker"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveWordColor(activeWordForColor)}
+                    className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-xs rounded-md border border-neutral-700 cursor-pointer ml-1 transition-colors"
+                    title="Remove highlight from this word only"
+                  >
+                    Remove / Normal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveWordForColor(null)}
+                    className="p-1 text-neutral-400 hover:text-white cursor-pointer ml-1 text-xs"
+                    title="Close color bar"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Interactive Words List */}
+            <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800 max-h-40 overflow-y-auto flex flex-wrap gap-1.5 leading-relaxed select-none">
               {storyTokens.map((rawWord, i) => {
                 const clean = cleanPunctuation(rawWord);
+                const displayWord = rawWord.replace(/^\[(?:#[0-9a-fA-F]{3,8}:)?|\]$/g, '');
                 const isHighlighted = activeHighlights.some((h) => {
                   const cleanH = cleanPunctuation(h);
                   if (cleanH.includes(' ')) {
                     return cleanH.split(/\s+/).some((p) => p === clean);
                   }
                   return cleanH === clean;
-                });
+                }) || Boolean(wordColors[clean]);
+
+                const wordSpecificColor = wordColors[clean] || (isHighlighted ? highlightColor : undefined);
+                const isCurrentlyActive = activeWordForColor && cleanPunctuation(activeWordForColor) === clean;
 
                 return (
                   <button
@@ -619,22 +777,27 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                     type="button"
                     onClick={() => handleToggleWordHighlight(rawWord)}
                     style={
-                      isHighlighted
+                      isHighlighted && wordSpecificColor
                         ? {
-                            backgroundColor: highlightStyle === 'pill' || highlightStyle === 'both' ? `${highlightColor}33` : `${highlightColor}22`,
-                            color: highlightStyle !== 'pill' ? highlightColor : '#ffffff',
-                            borderColor: `${highlightColor}88`,
+                            backgroundColor: highlightStyle === 'pill' || highlightStyle === 'both' ? `${wordSpecificColor}33` : `${wordSpecificColor}20`,
+                            color: highlightStyle !== 'pill' ? wordSpecificColor : '#ffffff',
+                            borderColor: `${wordSpecificColor}88`,
                           }
                         : {}
                     }
-                    className={`px-1.5 py-0.5 rounded text-xs transition-all cursor-pointer border ${
-                      isHighlighted
+                    className={`px-2 py-0.5 rounded-md text-xs transition-all cursor-pointer border flex items-center gap-1 ${
+                      isCurrentlyActive
+                        ? 'ring-2 ring-white border-white scale-105 shadow-md z-10'
+                        : isHighlighted
                         ? 'font-bold shadow-sm'
                         : 'border-transparent text-neutral-300 hover:text-white hover:bg-neutral-800'
                     }`}
-                    title={isHighlighted ? 'Click to remove highlight' : 'Click to highlight word'}
+                    title={isHighlighted ? `Colored (${wordSpecificColor}). Click to change color or remove.` : 'Click to color or highlight this word'}
                   >
-                    {rawWord}
+                    {isHighlighted && wordSpecificColor && (
+                      <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ backgroundColor: wordSpecificColor }} />
+                    )}
+                    <span>{displayWord}</span>
                   </button>
                 );
               })}
@@ -738,26 +901,37 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                 )}
               </div>
 
-              {/* Tag Badges */}
+              {/* Tag Badges with Word-Specific Color Pickers */}
               {customKeywords.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
-                  {customKeywords.map((kw) => (
-                    <span
-                      key={kw}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-neutral-900 border border-neutral-700 text-neutral-200"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: highlightColor }} />
-                      <span>{kw}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveCustomKeyword(kw)}
-                        className="text-neutral-400 hover:text-rose-400 ml-0.5 cursor-pointer"
-                        title="Remove highlight"
+                  {customKeywords.map((kw) => {
+                    const clean = cleanPunctuation(kw);
+                    const tagColor = wordColors[clean] || highlightColor;
+                    return (
+                      <span
+                        key={kw}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-neutral-900 border border-neutral-700 text-neutral-200 shadow-sm"
                       >
-                        ✕
-                      </button>
-                    </span>
-                  ))}
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: tagColor }} />
+                        <span style={{ color: tagColor }}>{kw}</span>
+                        <input
+                          type="color"
+                          value={tagColor}
+                          onChange={(e) => handleSetWordColor(kw, e.target.value)}
+                          className="w-4 h-4 rounded-full border-0 bg-transparent cursor-pointer p-0 ml-0.5"
+                          title={`Change color for "${kw}"`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveWordColor(kw)}
+                          className="text-neutral-400 hover:text-rose-400 ml-0.5 cursor-pointer text-xs"
+                          title="Remove highlight from this word"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-[11px] text-neutral-500 italic">
@@ -1007,6 +1181,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
           {/* Quick Popular Font Chips */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none mb-2">
             {[
+              { id: 'rubik', label: 'Rubik-Bold 🔥', weight: '800' },
               { id: 'impact', label: 'Impact' },
               { id: 'bebas-neue', label: 'Bebas Neue' },
               { id: 'oswald', label: 'Oswald' },
@@ -1021,7 +1196,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
               <button
                 key={chip.id}
                 type="button"
-                onClick={() => onChange({ fontFamily: chip.id })}
+                onClick={() => onChange({ fontFamily: chip.id, ...(chip.weight ? { fontWeight: chip.weight as any } : {}) })}
                 className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer shrink-0 border ${
                   script.fontFamily === chip.id
                     ? 'bg-rose-600 text-white border-rose-500 shadow-sm'

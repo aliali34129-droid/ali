@@ -64,8 +64,10 @@ export function extractBracketHighlights(text: string): string[] {
  */
 export function cleanPunctuation(str: string): string {
   if (!str) return '';
+  // Strip bracket color prefix like [#ef4444:word] if present
+  const stripped = str.replace(/^\[#([0-9a-fA-F]{3,8}):/, '[');
   // Support Unicode letters and numbers (\p{L} and \p{N}) across all languages including Urdu/Arabic
-  return str.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase().trim();
+  return stripped.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').toLowerCase().trim();
 }
 
 /**

@@ -58,6 +58,20 @@ export const FONT_FAMILIES_LIST: FontFamilyOption[] = [
     cssFont: '"Righteous", sans-serif',
   },
   {
+    id: 'rubik',
+    name: 'Rubik-Bold (Punchy Viral Shorts)',
+    category: 'Viral Impact',
+    cssFont: '"Rubik", system-ui, -apple-system, sans-serif',
+    isPopular: true,
+  },
+  {
+    id: 'rubik-bold',
+    name: 'Rubik-Bold Heavy (Extra Bold 800)',
+    category: 'Viral Impact',
+    cssFont: '"Rubik", system-ui, -apple-system, sans-serif',
+    isPopular: true,
+  },
+  {
     id: 'bungee',
     name: 'Bungee (Billboard Cap)',
     category: 'Viral Impact',
@@ -223,6 +237,81 @@ export interface TextStylePreset {
 
 export const TEXT_STYLE_PRESETS: TextStylePreset[] = [
   // 1. Viral & Shorts (High CTR & Loop Retention)
+  {
+    id: 'rubik-bold-viral',
+    name: 'Rubik-Bold Crimson Punch',
+    badge: 'Rubik-Bold 🔥',
+    category: 'Viral & Shorts',
+    previewBg: '#09090b',
+    previewTextColor: '#ef4444',
+    previewBorderColor: '#ef4444',
+    settings: {
+      fontFamily: 'rubik',
+      fontWeight: '800',
+      textTransform: 'none',
+      textColor: '#ffffff',
+      boxBackgroundColor: '#09090b',
+      boxOpacity: 0.98,
+      boxBorderRadius: 18,
+      boxPadding: 26,
+      boxMaxWidth: 86,
+      fontSize: 34,
+      lineHeight: 1.45,
+      highlightColor: '#ef4444',
+      highlightStyle: 'text',
+      textAlign: 'center',
+    },
+  },
+  {
+    id: 'rubik-bold-gold',
+    name: 'Rubik-Bold Gold & Dark',
+    badge: 'Rubik-Bold ⚡',
+    category: 'Viral & Shorts',
+    previewBg: '#000000',
+    previewTextColor: '#facc15',
+    previewBorderColor: '#facc15',
+    settings: {
+      fontFamily: 'rubik',
+      fontWeight: '800',
+      textTransform: 'none',
+      textColor: '#ffffff',
+      boxBackgroundColor: '#050505',
+      boxOpacity: 0.98,
+      boxBorderRadius: 16,
+      boxPadding: 26,
+      boxMaxWidth: 86,
+      fontSize: 34,
+      lineHeight: 1.45,
+      highlightColor: '#facc15',
+      highlightStyle: 'pill',
+      textAlign: 'center',
+    },
+  },
+  {
+    id: 'rubik-bold-cyan',
+    name: 'Rubik-Bold Electric Cyan',
+    badge: 'Rubik-Bold 💎',
+    category: 'Viral & Shorts',
+    previewBg: '#09090b',
+    previewTextColor: '#38bdf8',
+    previewBorderColor: '#0ea5e9',
+    settings: {
+      fontFamily: 'rubik',
+      fontWeight: '800',
+      textTransform: 'none',
+      textColor: '#ffffff',
+      boxBackgroundColor: '#09090b',
+      boxOpacity: 0.98,
+      boxBorderRadius: 18,
+      boxPadding: 26,
+      boxMaxWidth: 86,
+      fontSize: 34,
+      lineHeight: 1.45,
+      highlightColor: '#38bdf8',
+      highlightStyle: 'pill',
+      textAlign: 'center',
+    },
+  },
   {
     id: 'viral-tiktok-punch',
     name: 'Viral TikTok Crimson',
@@ -773,7 +862,9 @@ export function getCanvasFontString(
   script: ScriptSettings,
   adjustedFontSize: number
 ): string {
-  const weight = script.fontWeight || '700'; // Default bold/punchy
+  const weight = (script.fontFamily === 'rubik-bold' || script.fontFamily === 'rubik')
+    ? (script.fontWeight || '800')
+    : (script.fontWeight || '700'); // Default bold/punchy
   const style = script.fontStyle || 'normal';
   const familyCss = resolveFontFamilyCss(script.fontFamily || 'sans-serif');
 

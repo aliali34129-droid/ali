@@ -28,6 +28,7 @@ export interface ScriptSettings {
   highlightColor?: string; // default '#ef4444' (Red)
   highlightStyle?: 'text' | 'pill' | 'both'; // default 'text'
   customKeywords?: string[]; // additional custom / manually selected keywords
+  wordColors?: Record<string, string>; // custom color for each specific word or phrase (e.g. { 'strongheart': '#ef4444', 'etzel': '#38bdf8' })
   excludedKeywords?: string[]; // keywords excluded by user
 }
 

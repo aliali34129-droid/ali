@@ -49,6 +49,7 @@ export function isRtlText(text: string): boolean {
 export interface RenderWord {
   text: string;
   isHighlighted: boolean;
+  customColor?: string;
   width: number;
 }
 
@@ -80,12 +81,14 @@ export function wrapFormattedWords(
   ctx: CanvasRenderingContext2D,
   rawText: string,
   maxWidth: number,
-  activeKeywords: string[]
+  activeKeywords: string[],
+  wordColors?: Record<string, string>
 ): RenderLine[] {
   if (!rawText) return [];
 
   const roundedMaxWidth = Math.round(maxWidth);
-  const cacheKey = `${ctx.font}_${roundedMaxWidth}_${activeKeywords.join(',')}__${rawText}`;
+  const colorsKey = wordColors ? Object.entries(wordColors).map(([k, v]) => `${k}:${v}`).sort().join(';') : '';
+  const cacheKey = `${ctx.font}_${roundedMaxWidth}_${activeKeywords.join(',')}_${colorsKey}__${rawText}`;
   const cached = wrapCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -104,20 +107,29 @@ export function wrapFormattedWords(
       continue;
     }
 
-    // Tokenize words, detecting bracket markup [word] or [multi word phrase]
+    // Tokenize words, detecting bracket markup [word] or [multi word phrase] or [#hex:phrase]
     const rawTokens = paragraph.split(/\s+/).filter(Boolean);
     let currentLineWords: RenderWord[] = [];
     let currentLineWidth = 0;
     let isInsideBracket = false;
+    let currentBracketColor: string | undefined = undefined;
 
     for (let i = 0; i < rawTokens.length; i++) {
       let rawToken = rawTokens[i];
       let wordHighlighted = false;
+      let wordColor: string | undefined = undefined;
 
-      // Check if starting a bracket [phrase
+      // Check if starting a bracket [phrase or [#hex:phrase
       if (rawToken.startsWith('[')) {
         isInsideBracket = true;
         rawToken = rawToken.substring(1);
+        const colorMatch = rawToken.match(/^#([0-9a-fA-F]{3,8}):(.*)$/);
+        if (colorMatch) {
+          currentBracketColor = '#' + colorMatch[1];
+          rawToken = colorMatch[2];
+        } else {
+          currentBracketColor = undefined;
+        }
       }
 
       // Check if closing bracket phrase]
@@ -127,8 +139,15 @@ export function wrapFormattedWords(
         rawToken = rawToken.slice(0, -1);
       }
 
+      const cleanToken = cleanPunctuation(rawToken);
+
       if (isInsideBracket) {
         wordHighlighted = true;
+        if (currentBracketColor) {
+          wordColor = currentBracketColor;
+        } else if (wordColors && cleanToken && wordColors[cleanToken]) {
+          wordColor = wordColors[cleanToken];
+        }
       } else {
         wordHighlighted = isWordKeyword(rawToken, activeKeywords);
         if (!wordHighlighted && activeKeywords.some((k) => k.includes(' '))) {
@@ -149,6 +168,9 @@ export function wrapFormattedWords(
                   }
                   if (matchesPhrase) {
                     wordHighlighted = true;
+                    if (wordColors && wordColors[cleanPunctuation(kw)]) {
+                      wordColor = wordColors[cleanPunctuation(kw)];
+                    }
                     break;
                   }
                 }
@@ -157,10 +179,17 @@ export function wrapFormattedWords(
             if (wordHighlighted) break;
           }
         }
+
+        // Direct check against wordColors map for this word or clean token
+        if (wordColors && cleanToken && wordColors[cleanToken]) {
+          wordHighlighted = true;
+          wordColor = wordColors[cleanToken];
+        }
       }
 
       if (endsBracket) {
         isInsideBracket = false;
+        currentBracketColor = undefined;
       }
 
       const wordWidth = ctx.measureText(rawToken).width;
@@ -182,10 +211,10 @@ export function wrapFormattedWords(
           words: currentLineWords,
           totalWidth: currentLineWidth,
         });
-        currentLineWords = [{ text: rawToken, isHighlighted: wordHighlighted, width: wordWidth }];
+        currentLineWords = [{ text: rawToken, isHighlighted: wordHighlighted, customColor: wordColor, width: wordWidth }];
         currentLineWidth = wordWidth;
       } else {
-        currentLineWords.push({ text: rawToken, isHighlighted: wordHighlighted, width: wordWidth });
+        currentLineWords.push({ text: rawToken, isHighlighted: wordHighlighted, customColor: wordColor, width: wordWidth });
         currentLineWidth = neededWidth;
       }
     }
@@ -499,7 +528,13 @@ export function renderCanvasFrame(
     project.script.excludedKeywords || []
   );
 
-  const formattedLines = wrapFormattedWords(ctx, processedText, maxTextLineWidth, activeHighlights);
+  const formattedLines = wrapFormattedWords(
+    ctx,
+    processedText,
+    maxTextLineWidth,
+    activeHighlights,
+    project.script.wordColors
+  );
   const calculatedLineHeight = adjustedFontSize * project.script.lineHeight;
   const extraHeight = Math.round((project.script.boxHeightExtra || 0) * scaleRatio);
   const bottomSafetyPadding = Math.round(20 * scaleRatio);
@@ -660,12 +695,13 @@ export function renderCanvasFrame(
       for (let w = 0; w < line.words.length; w++) {
         const wordObj = line.words[w];
         const wordStartX = curRight - wordObj.width;
+        const effectiveWordColor = wordObj.customColor || highlightColor;
 
         if (wordObj.isHighlighted) {
           if (highlightStyle === 'pill' || highlightStyle === 'both') {
             ctx.save();
             const pillAlpha = highlightStyle === 'pill' ? 0.92 : 0.38;
-            ctx.fillStyle = hexToRgba(highlightColor, pillAlpha);
+            ctx.fillStyle = hexToRgba(effectiveWordColor, pillAlpha);
             roundRect(
               ctx,
               wordStartX - 5 * scaleRatio,
@@ -679,10 +715,10 @@ export function renderCanvasFrame(
           }
 
           if (highlightStyle === 'pill') {
-            const isBright = ['#facc15', '#fde047', '#a3e635', '#22c55e', '#22d3ee', '#fbbf24', '#fef08a'].some(c => highlightColor.toLowerCase() === c.toLowerCase());
+            const isBright = ['#facc15', '#fde047', '#a3e635', '#22c55e', '#22d3ee', '#fbbf24', '#fef08a', '#ffffff'].some(c => effectiveWordColor.toLowerCase() === c.toLowerCase());
             ctx.fillStyle = isBright ? '#000000' : '#ffffff';
           } else {
-            ctx.fillStyle = highlightColor;
+            ctx.fillStyle = effectiveWordColor;
           }
         } else {
           ctx.fillStyle = defaultTextColor;
@@ -702,12 +738,13 @@ export function renderCanvasFrame(
 
       for (let w = 0; w < line.words.length; w++) {
         const wordObj = line.words[w];
+        const effectiveWordColor = wordObj.customColor || highlightColor;
 
         if (wordObj.isHighlighted) {
           if (highlightStyle === 'pill' || highlightStyle === 'both') {
             ctx.save();
             const pillAlpha = highlightStyle === 'pill' ? 0.92 : 0.38;
-            ctx.fillStyle = hexToRgba(highlightColor, pillAlpha);
+            ctx.fillStyle = hexToRgba(effectiveWordColor, pillAlpha);
             roundRect(
               ctx,
               wordX - 5 * scaleRatio,
@@ -721,10 +758,10 @@ export function renderCanvasFrame(
           }
 
           if (highlightStyle === 'pill') {
-            const isBright = ['#facc15', '#fde047', '#a3e635', '#22c55e', '#22d3ee', '#fbbf24', '#fef08a'].some(c => highlightColor.toLowerCase() === c.toLowerCase());
+            const isBright = ['#facc15', '#fde047', '#a3e635', '#22c55e', '#22d3ee', '#fbbf24', '#fef08a', '#ffffff'].some(c => effectiveWordColor.toLowerCase() === c.toLowerCase());
             ctx.fillStyle = isBright ? '#000000' : '#ffffff';
           } else {
-            ctx.fillStyle = highlightColor;
+            ctx.fillStyle = effectiveWordColor;
           }
         } else {
           ctx.fillStyle = defaultTextColor;
@@ -804,7 +841,13 @@ export function getCanvasLayerBounds(
       project.script.customKeywords || [],
       project.script.excludedKeywords || []
     );
-    const lines = wrapFormattedWords(tCtx, processedText, maxTextLineWidth, activeKeywords);
+    const lines = wrapFormattedWords(
+      tCtx,
+      processedText,
+      maxTextLineWidth,
+      activeKeywords,
+      project.script.wordColors
+    );
     lineCount = Math.max(1, lines.length);
   }
 
