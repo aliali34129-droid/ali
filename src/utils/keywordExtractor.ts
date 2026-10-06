@@ -176,10 +176,8 @@ export function isWordKeyword(word: string, activeKeywords: string[]): boolean {
 
   for (const kw of activeKeywords) {
     const cleanKw = cleanPunctuation(kw);
-    if (cleanKw.includes(' ')) {
-      const parts = cleanKw.split(/\s+/).map((p) => cleanPunctuation(p));
-      if (parts.some((p) => p === cleanWord)) return true;
-    } else if (cleanKw === cleanWord) {
+    // Exact word match only! Never match arbitrary sub-words of multi-word phrases.
+    if (cleanKw === cleanWord) {
       return true;
     }
   }

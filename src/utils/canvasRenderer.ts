@@ -1,5 +1,5 @@
 import { VideoProject } from '../types';
-import { getActiveHighlights, isWordKeyword } from './keywordExtractor';
+import { getActiveHighlights, isWordKeyword, cleanPunctuation } from './keywordExtractor';
 import { getCanvasFontString } from './textStyles';
 
 /**
@@ -131,6 +131,32 @@ export function wrapFormattedWords(
         wordHighlighted = true;
       } else {
         wordHighlighted = isWordKeyword(rawToken, activeKeywords);
+        if (!wordHighlighted && activeKeywords.some((k) => k.includes(' '))) {
+          // Check if rawToken is part of an exact multi-word phrase match at this exact sequence
+          for (const kw of activeKeywords) {
+            if (kw.includes(' ')) {
+              const kwParts = kw.split(/\s+/).map((p) => cleanPunctuation(p)).filter(Boolean);
+              for (let startOffset = 0; startOffset < kwParts.length; startOffset++) {
+                const startIndex = i - startOffset;
+                if (startIndex >= 0 && startIndex + kwParts.length <= rawTokens.length) {
+                  let matchesPhrase = true;
+                  for (let k = 0; k < kwParts.length; k++) {
+                    const tokenClean = cleanPunctuation(rawTokens[startIndex + k]);
+                    if (tokenClean !== kwParts[k]) {
+                      matchesPhrase = false;
+                      break;
+                    }
+                  }
+                  if (matchesPhrase) {
+                    wordHighlighted = true;
+                    break;
+                  }
+                }
+              }
+            }
+            if (wordHighlighted) break;
+          }
+        }
       }
 
       if (endsBracket) {
@@ -406,16 +432,8 @@ export function renderCanvasFrame(
   ctx.fillStyle = '#0a0a0a';
   ctx.fillRect(0, 0, width, height);
 
-  if (!img) {
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '22px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Select or upload an image to preview', width / 2, height / 2);
-    return;
-  }
-
-  const naturalWidth = (img as HTMLImageElement).naturalWidth || (img as HTMLVideoElement).videoWidth || 800;
-  const naturalHeight = (img as HTMLImageElement).naturalHeight || (img as HTMLVideoElement).videoHeight || 600;
+  const naturalWidth = (img as HTMLImageElement)?.naturalWidth || (img as HTMLVideoElement)?.videoWidth || 800;
+  const naturalHeight = (img as HTMLImageElement)?.naturalHeight || (img as HTMLVideoElement)?.videoHeight || 600;
 
   // 1. CALCULATE MOTION (If enabled by user)
   let motionScale = 1.0;
@@ -518,33 +536,51 @@ export function renderCanvasFrame(
   const imgY = baseImgY + imgOffsetY;
 
   // 5. DRAW FOREGROUND IMAGE
-  ctx.save();
-  const imgRadius = Math.round(project.adjust.imageBorderRadius * scaleRatio);
+  if (img) {
+    ctx.save();
+    const imgRadius = Math.round(project.adjust.imageBorderRadius * scaleRatio);
 
-  if (project.adjust.imageShadow) {
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
-    ctx.shadowBlur = 30 * scaleRatio;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 12 * scaleRatio;
-  }
+    if (project.adjust.imageShadow) {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
+      ctx.shadowBlur = 30 * scaleRatio;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 12 * scaleRatio;
+    }
 
-  roundRect(ctx, imgX, imgY, targetImgW, targetImgH, imgRadius);
-  if (project.adjust.imageShadow) {
-    ctx.fillStyle = '#000000';
+    roundRect(ctx, imgX, imgY, targetImgW, targetImgH, imgRadius);
+    if (project.adjust.imageShadow) {
+      ctx.fillStyle = '#000000';
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
+    }
+    ctx.clip();
+    ctx.drawImage(img, imgX, imgY, targetImgW, targetImgH);
+    ctx.restore();
+
+    // Clean border around foreground image
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.lineWidth = 1.5 * scaleRatio;
+    roundRect(ctx, imgX, imgY, targetImgW, targetImgH, imgRadius);
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    // Elegant placeholder card when image is loading or not selected
+    ctx.save();
+    const imgRadius = Math.round(project.adjust.imageBorderRadius * scaleRatio);
+    roundRect(ctx, imgX, imgY, targetImgW, targetImgH, imgRadius);
+    ctx.fillStyle = '#18181b';
     ctx.fill();
-    ctx.shadowColor = 'transparent';
-  }
-  ctx.clip();
-  ctx.drawImage(img, imgX, imgY, targetImgW, targetImgH);
-  ctx.restore();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1.5 * scaleRatio;
+    ctx.stroke();
 
-  // Clean border around foreground image
-  ctx.save();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
-  ctx.lineWidth = 1.5 * scaleRatio;
-  roundRect(ctx, imgX, imgY, targetImgW, targetImgH, imgRadius);
-  ctx.stroke();
-  ctx.restore();
+    ctx.fillStyle = '#a1a1aa';
+    ctx.font = `600 ${Math.round(18 * scaleRatio)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('🖼️ Click Add Media to choose picture', imgX + targetImgW / 2, imgY + targetImgH / 2);
+    ctx.restore();
+  }
 
   // 6. DRAW BLACK TEXT CARD
   const textBoxX = baseTextBoxX + textOffsetX;
@@ -628,19 +664,26 @@ export function renderCanvasFrame(
         if (wordObj.isHighlighted) {
           if (highlightStyle === 'pill' || highlightStyle === 'both') {
             ctx.save();
-            ctx.fillStyle = hexToRgba(highlightColor, 0.28);
+            const pillAlpha = highlightStyle === 'pill' ? 0.92 : 0.38;
+            ctx.fillStyle = hexToRgba(highlightColor, pillAlpha);
             roundRect(
               ctx,
-              wordStartX - 4 * scaleRatio,
+              wordStartX - 5 * scaleRatio,
               lineY - 2 * scaleRatio,
-              wordObj.width + 8 * scaleRatio,
+              wordObj.width + 10 * scaleRatio,
               calculatedLineHeight - 4 * scaleRatio,
-              5 * scaleRatio
+              6 * scaleRatio
             );
             ctx.fill();
             ctx.restore();
           }
-          ctx.fillStyle = highlightStyle !== 'pill' ? highlightColor : defaultTextColor;
+
+          if (highlightStyle === 'pill') {
+            const isBright = ['#facc15', '#fde047', '#a3e635', '#22c55e', '#22d3ee', '#fbbf24', '#fef08a'].some(c => highlightColor.toLowerCase() === c.toLowerCase());
+            ctx.fillStyle = isBright ? '#000000' : '#ffffff';
+          } else {
+            ctx.fillStyle = highlightColor;
+          }
         } else {
           ctx.fillStyle = defaultTextColor;
         }
@@ -663,19 +706,26 @@ export function renderCanvasFrame(
         if (wordObj.isHighlighted) {
           if (highlightStyle === 'pill' || highlightStyle === 'both') {
             ctx.save();
-            ctx.fillStyle = hexToRgba(highlightColor, 0.28);
+            const pillAlpha = highlightStyle === 'pill' ? 0.92 : 0.38;
+            ctx.fillStyle = hexToRgba(highlightColor, pillAlpha);
             roundRect(
               ctx,
-              wordX - 4 * scaleRatio,
+              wordX - 5 * scaleRatio,
               lineY - 2 * scaleRatio,
-              wordObj.width + 8 * scaleRatio,
+              wordObj.width + 10 * scaleRatio,
               calculatedLineHeight - 4 * scaleRatio,
-              5 * scaleRatio
+              6 * scaleRatio
             );
             ctx.fill();
             ctx.restore();
           }
-          ctx.fillStyle = highlightStyle !== 'pill' ? highlightColor : defaultTextColor;
+
+          if (highlightStyle === 'pill') {
+            const isBright = ['#facc15', '#fde047', '#a3e635', '#22c55e', '#22d3ee', '#fbbf24', '#fef08a'].some(c => highlightColor.toLowerCase() === c.toLowerCase());
+            ctx.fillStyle = isBright ? '#000000' : '#ffffff';
+          } else {
+            ctx.fillStyle = highlightColor;
+          }
         } else {
           ctx.fillStyle = defaultTextColor;
         }

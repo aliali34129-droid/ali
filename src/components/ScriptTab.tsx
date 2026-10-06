@@ -143,16 +143,58 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
   // Highlight currently selected text
   const handleHighlightSelection = (color?: string) => {
     if (!selectedText) return;
-    const clean = selectedText.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '').trim();
+    const clean = selectedText.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').trim();
     if (!clean) return;
 
+    // Switch to manual-only mode so AI auto-detection doesn't highlight other words!
     const updatedKeywords = Array.from(new Set([...customKeywords, clean]));
     onChange({
       customKeywords: updatedKeywords,
-      highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
+      highlightMode: 'manual-only',
+      autoHighlightKeywords: false,
       ...(color ? { highlightColor: color } : {}),
     });
     setSelectedText('');
+  };
+
+  // Highlight ONLY this selected word/phrase (clearing any other preset highlights)
+  const handleHighlightSelectionOnly = (color?: string) => {
+    if (!selectedText) return;
+    const clean = selectedText.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '').trim();
+    if (!clean) return;
+
+    onChange({
+      customKeywords: [clean],
+      highlightMode: 'manual-only',
+      autoHighlightKeywords: false,
+      excludedKeywords: [],
+      ...(color ? { highlightColor: color } : {}),
+    });
+    setSelectedText('');
+  };
+
+  // Wrap selected text directly with [bracket] syntax in textarea
+  const handleWrapBrackets = () => {
+    if (!textareaRef.current) return;
+    const start = textareaRef.current.selectionStart;
+    const end = textareaRef.current.selectionEnd;
+    const currentVal = textareaRef.current.value;
+
+    if (start !== end) {
+      const selected = currentVal.substring(start, end).trim();
+      if (!selected) return;
+
+      const before = currentVal.substring(0, start);
+      const after = currentVal.substring(end);
+      const newText = `${before}[${selected}]${after}`;
+
+      onChange({
+        text: newText,
+        highlightMode: 'manual-only',
+        autoHighlightKeywords: false,
+      });
+      setSelectedText('');
+    }
   };
 
   // Toggle word highlight via interactive click
@@ -278,30 +320,88 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
           </label>
           <span className="text-[11px] text-neutral-400">Click to load</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => handleQuickPreset('preset-strongheart')}
-            className="p-2.5 rounded-lg border border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/80 hover:border-neutral-700 text-left transition-colors cursor-pointer group"
+            className="p-2.5 rounded-lg border border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/80 hover:border-neutral-700 text-left transition-all cursor-pointer group hover:scale-[1.01]"
           >
-            <div className="text-xs font-medium text-neutral-200 group-hover:text-rose-400 flex items-center gap-1.5">
-              <span>🐕</span> Strongheart (First Dog Star)
+            <div className="text-xs font-semibold text-neutral-200 group-hover:text-rose-400 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><span>🐕</span> Strongheart (Dog Star)</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 text-rose-300 border border-neutral-800">Hollywood</span>
             </div>
-            <div className="text-[11px] text-neutral-400 line-clamp-1 mt-0.5">
-              Before Rin Tin Tin there was a German Shepherd called Etzel...
+            <div className="text-[11px] text-neutral-400 line-clamp-1 mt-1">
+              Berlin police dog turned Hollywood legend...
             </div>
           </button>
 
           <button
             type="button"
             onClick={() => handleQuickPreset('preset-nat-king-cole')}
-            className="p-2.5 rounded-lg border border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/80 hover:border-neutral-700 text-left transition-colors cursor-pointer group"
+            className="p-2.5 rounded-lg border border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/80 hover:border-neutral-700 text-left transition-all cursor-pointer group hover:scale-[1.01]"
           >
-            <div className="text-xs font-medium text-neutral-200 group-hover:text-rose-400 flex items-center gap-1.5">
-              <span>🎹</span> Nat King Cole (Stage Incident)
+            <div className="text-xs font-semibold text-neutral-200 group-hover:text-amber-400 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><span>🎹</span> Nat King Cole (1956)</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 text-amber-300 border border-neutral-800">Drama</span>
             </div>
-            <div className="text-[11px] text-neutral-400 line-clamp-1 mt-0.5">
-              Birmingham, Alabama, April nineteen fifty six...
+            <div className="text-[11px] text-neutral-400 line-clamp-1 mt-1">
+              Men ran down the aisle and dragged him off his piano...
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickPreset('preset-emu-war')}
+            className="p-2.5 rounded-lg border border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/80 hover:border-neutral-700 text-left transition-all cursor-pointer group hover:scale-[1.01]"
+          >
+            <div className="text-xs font-semibold text-neutral-200 group-hover:text-lime-400 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><span>🐦</span> The Great Emu War (1932)</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 text-lime-300 border border-neutral-800">History</span>
+            </div>
+            <div className="text-[11px] text-neutral-400 line-clamp-1 mt-1">
+              When an army with machine guns surrendered to birds...
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickPreset('preset-apollo-11')}
+            className="p-2.5 rounded-lg border border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/80 hover:border-neutral-700 text-left transition-all cursor-pointer group hover:scale-[1.01]"
+          >
+            <div className="text-xs font-semibold text-neutral-200 group-hover:text-cyan-400 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><span>🚀</span> Apollo 11 (20s Clock)</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 text-cyan-300 border border-neutral-800">Space</span>
+            </div>
+            <div className="text-[11px] text-neutral-400 line-clamp-1 mt-1">
+              Only twenty seconds of fuel remaining over the moon...
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickPreset('preset-paris-catacombs')}
+            className="p-2.5 rounded-lg border border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/80 hover:border-neutral-700 text-left transition-all cursor-pointer group hover:scale-[1.01]"
+          >
+            <div className="text-xs font-semibold text-neutral-200 group-hover:text-red-400 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><span>🎬</span> Paris Secret Cinema</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 text-red-300 border border-neutral-800">Mystery</span>
+            </div>
+            <div className="text-[11px] text-neutral-400 line-clamp-1 mt-1">
+              Underground catacombs cinema that vanished overnight...
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickPreset('preset-urdu-kohenoor')}
+            className="p-2.5 rounded-lg border border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/80 hover:border-neutral-700 text-left transition-all cursor-pointer group hover:scale-[1.01]"
+          >
+            <div className="text-xs font-semibold text-neutral-200 group-hover:text-emerald-400 flex items-center justify-between">
+              <span className="flex items-center gap-1.5"><span>👑</span> کوہِ نور ہیرے کا راز</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 text-emerald-300 border border-neutral-800">اردو</span>
+            </div>
+            <div className="text-[11px] text-neutral-400 line-clamp-1 mt-1 text-right font-urdu">
+              جس بادشاہ کے پاس گیا، سلطنت برباد ہو گئی...
             </div>
           </button>
         </div>
@@ -333,21 +433,38 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
 
         {/* Selected Text Quick Action Banner ("sirf selected text ko highlight karein") */}
         {selectedText ? (
-          <div className="mb-2 p-2.5 rounded-lg bg-rose-950/40 border border-rose-800/60 flex items-center justify-between gap-3 animate-in fade-in duration-150">
+          <div className="mb-2 p-2.5 rounded-lg bg-rose-950/40 border border-rose-800/60 flex flex-wrap items-center justify-between gap-2 animate-in fade-in duration-150">
             <div className="flex items-center gap-2 text-xs overflow-hidden">
               <Highlighter className="w-4 h-4 text-rose-400 shrink-0" />
               <span className="text-neutral-300 truncate">
                 Selected: <strong className="text-rose-300 font-semibold underline decoration-rose-500">"{selectedText}"</strong>
               </span>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleHighlightSelectionOnly()}
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-md shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                title="Baqi sab lafz hata kar sirf is ek lafz ko highlight karein"
+              >
+                <span>Only This Word</span>
+              </button>
               <button
                 type="button"
                 onClick={() => handleHighlightSelection()}
-                className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs rounded-md shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs rounded-md shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                title="Is word ko manual highlights mein add karein"
               >
-                <span>Highlight Selected</span>
+                <span>Highlight Word</span>
                 <Check className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onClick={handleWrapBrackets}
+                className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-mono font-bold text-xs rounded-md border border-neutral-700 transition-colors cursor-pointer"
+                title="Wrap with [ ] brackets in text"
+              >
+                [ ]
               </button>
               <button
                 type="button"

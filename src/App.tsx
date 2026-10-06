@@ -66,12 +66,15 @@ export default function App() {
       };
     } else {
       const img = new Image();
-      img.crossOrigin = 'anonymous';
+      if (project.mediaUrl.startsWith('http://') || project.mediaUrl.startsWith('https://')) {
+        img.crossOrigin = 'anonymous';
+      }
       img.onload = () => {
         setLoadedMedia(img);
       };
       img.onerror = () => {
         console.warn('Failed to load image at', project.mediaUrl);
+        setLoadedMedia(null);
       };
       img.src = project.mediaUrl;
     }
