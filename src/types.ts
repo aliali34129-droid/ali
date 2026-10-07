@@ -63,6 +63,14 @@ export interface AudioSettings {
   customAudioSize?: number;
   volume: number; // 0 to 1
   loop?: boolean; // default true
+  
+  // Long Music Trimming & Adjustment (Auto & Manual Options)
+  trimMode?: 'auto' | 'manual'; // 'auto' (loops first 8s seamlessly) | 'manual' (user sets start offset)
+  startTime?: number; // Start offset in seconds (e.g. 15.5s)
+  durationSec?: number; // Sliced duration in seconds (defaults to video duration)
+  totalAudioDuration?: number; // Total length of original audio file in seconds (e.g. 195s)
+  fadeIn?: boolean; // Smooth audio fade-in
+  fadeOut?: boolean; // Smooth audio fade-out
 }
 
 export interface VideoProject {
@@ -97,4 +105,26 @@ export interface ExportedVideo {
   resolution: string;
   sizeBytes: number;
   createdAt: string;
+}
+
+// User-Saved Preset/Template for repetitive workflows
+export interface SavedUserTemplate {
+  id: string;
+  name: string;
+  createdAt: string;
+  isDefault?: boolean;
+  script: Partial<ScriptSettings>;
+  adjust: Partial<AdjustSettings>;
+  audio: Partial<AudioSettings>;
+  durationSeconds?: number;
+}
+
+// User-Saved Project / Draft for loading and re-editing anytime
+export interface SavedProjectRecord {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  project: VideoProject;
+  thumbnailUrl?: string;
 }

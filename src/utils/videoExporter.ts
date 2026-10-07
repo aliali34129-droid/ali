@@ -79,10 +79,33 @@ export class VideoRendererEngine {
         if (audioBuffer) {
           audioSourceNode = audioCtx.createBufferSource();
           audioSourceNode.buffer = audioBuffer;
-          audioSourceNode.loop = project.audio.loop ?? true;
+
+          const audioStartTime = Math.max(0, project.audio.startTime || 0);
+          const isLooping = project.audio.loop ?? true;
+
+          audioSourceNode.loop = isLooping;
+          if (isLooping && audioBuffer.duration > duration) {
+            audioSourceNode.loopStart = audioStartTime;
+            audioSourceNode.loopEnd = Math.min(audioBuffer.duration, audioStartTime + duration);
+          }
 
           const gainNode = audioCtx.createGain();
-          gainNode.gain.value = project.audio.volume ?? 0.7;
+          const baseVolume = project.audio.volume ?? 0.7;
+
+          // Handle Fade In & Fade Out
+          if (project.audio.fadeIn) {
+            gainNode.gain.setValueAtTime(0.001, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(baseVolume, audioCtx.currentTime + 0.5);
+          } else {
+            gainNode.gain.setValueAtTime(baseVolume, audioCtx.currentTime);
+          }
+
+          if (project.audio.fadeOut) {
+            const fadeStart = Math.max(0, duration - 0.6);
+            gainNode.gain.setValueAtTime(baseVolume, audioCtx.currentTime + fadeStart);
+            gainNode.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+          }
+
           audioSourceNode.connect(gainNode);
           gainNode.connect(dest);
 
@@ -197,7 +220,8 @@ export class VideoRendererEngine {
       mediaRecorder.start();
       if (audioSourceNode) {
         try {
-          audioSourceNode.start(0);
+          const audioOffset = Math.max(0, project.audio.startTime || 0);
+          audioSourceNode.start(0, audioOffset);
         } catch (err) {
           console.warn('Could not start audio node:', err);
         }

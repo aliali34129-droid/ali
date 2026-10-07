@@ -356,7 +356,11 @@ export const CreateVideoModal: React.FC<CreateVideoModalProps> = ({
               )}
               <span className={project.audio.enabled ? 'text-neutral-300' : 'text-neutral-400'}>
                 {project.audio.enabled
-                  ? `Background audio: ${project.audio.customAudioName || (project.audio.ambientTrack && project.audio.ambientTrack !== 'none' ? project.audio.ambientTrack.replace('-', ' ') : 'Active track')} (${Math.round((project.audio.volume ?? 0.7) * 100)}% vol)`
+                  ? `Background audio: ${project.audio.customAudioName || (project.audio.ambientTrack && project.audio.ambientTrack !== 'none' ? project.audio.ambientTrack.replace('-', ' ') : 'Active track')} (${Math.round((project.audio.volume ?? 0.7) * 100)}% vol) · ${
+                      project.audio.trimMode === 'manual'
+                        ? `Manual Slice (${(project.audio.startTime || 0).toFixed(1)}s - ${((project.audio.startTime || 0) + (project.durationSeconds || 8)).toFixed(1)}s)`
+                        : 'Auto-Adjust Loop'
+                    }`
                   : 'Background audio: Muted (silent loop video)'}
               </span>
             </div>

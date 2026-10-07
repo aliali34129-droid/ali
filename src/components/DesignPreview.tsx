@@ -269,7 +269,7 @@ export const DesignPreview: React.FC<DesignPreviewProps> = ({
     }
   };
 
-  // Sync preview audio playback
+  // Sync preview audio playback with trim start offset
   useEffect(() => {
     if (!project.audio.customAudioUrl || !project.audio.enabled || isPreviewMuted) {
       if (previewAudioRef.current) {
@@ -284,21 +284,46 @@ export const DesignPreview: React.FC<DesignPreviewProps> = ({
       previewAudioRef.current.src = project.audio.customAudioUrl;
     }
 
-    previewAudioRef.current.volume = Math.max(0, Math.min(1, project.audio.volume ?? 0.7));
-    previewAudioRef.current.loop = project.audio.loop ?? true;
+    const audioEl = previewAudioRef.current;
+    const startSec = Math.max(0, project.audio.startTime || 0);
+    const endSec = startSec + durationSec;
+
+    audioEl.volume = Math.max(0, Math.min(1, project.audio.volume ?? 0.7));
+
+    // Handle time update to loop within the trimmed window
+    const handleTimeUpdate = () => {
+      if (audioEl.currentTime >= endSec || audioEl.currentTime < startSec - 0.5) {
+        audioEl.currentTime = startSec;
+      }
+    };
+
+    audioEl.addEventListener('timeupdate', handleTimeUpdate);
 
     if (isPlaying) {
-      previewAudioRef.current.play().catch(() => {});
+      if (Math.abs(audioEl.currentTime - startSec) > durationSec || audioEl.currentTime < startSec) {
+        audioEl.currentTime = startSec;
+      }
+      audioEl.play().catch(() => {});
     } else {
-      previewAudioRef.current.pause();
+      audioEl.pause();
     }
 
     return () => {
-      if (previewAudioRef.current) {
-        previewAudioRef.current.pause();
+      audioEl.removeEventListener('timeupdate', handleTimeUpdate);
+      if (audioEl) {
+        audioEl.pause();
       }
     };
-  }, [isPlaying, project.audio.customAudioUrl, project.audio.enabled, project.audio.volume, project.audio.loop, isPreviewMuted]);
+  }, [
+    isPlaying,
+    project.audio.customAudioUrl,
+    project.audio.enabled,
+    project.audio.volume,
+    project.audio.loop,
+    project.audio.startTime,
+    durationSec,
+    isPreviewMuted,
+  ]);
 
   // High-performance animation loop: decoupled from React state to avoid lag
   useEffect(() => {

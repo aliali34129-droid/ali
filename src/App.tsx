@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { VideoProject, ExportedVideo } from './types';
+import { VideoProject, ExportedVideo, SavedUserTemplate } from './types';
 import { PRESET_PROJECTS } from './utils/presets';
 import { ThemeId, STUDIO_THEMES, DEFAULT_THEME_ID, getTheme } from './utils/themes';
 import { TopNav } from './components/TopNav';
@@ -11,16 +11,82 @@ import { DesignPreview } from './components/DesignPreview';
 import { CreateVideoModal } from './components/CreateVideoModal';
 import { SavedLoopsTab } from './components/SavedLoopsTab';
 import { ImageCropModal } from './components/ImageCropModal';
-import { FileText, Image as ImageIcon, Sliders, Music } from 'lucide-react';
+import { ProjectsManagerModal } from './components/ProjectsManagerModal';
+import { SavePresetModal } from './components/SavePresetModal';
+import {
+  getSavedProjects,
+  saveProjectRecord,
+  saveDraftProject,
+  getDraftProject,
+  deleteProjectRecord,
+  duplicateProjectRecord,
+} from './utils/projectStorage';
+import {
+  getUserTemplates,
+  getDefaultUserTemplate,
+} from './utils/userTemplates';
+import {
+  FileText,
+  Image as ImageIcon,
+  Sliders,
+  Music,
+  Bookmark,
+  FolderKanban,
+  Save,
+  Check,
+  Sparkles,
+} from 'lucide-react';
 
 export default function App() {
-  const [project, setProject] = useState<VideoProject>(PRESET_PROJECTS[0]);
+  const [project, setProject] = useState<VideoProject>(() => {
+    // 1. Try restoring active draft if available
+    try {
+      const draft = getDraftProject();
+      if (draft && draft.script && draft.adjust) {
+        return draft;
+      }
+    } catch {}
+
+    // 2. Try applying user's default template if set
+    try {
+      const defTmpl = getDefaultUserTemplate();
+      if (defTmpl) {
+        return {
+          ...PRESET_PROJECTS[0],
+          id: `proj-${Date.now()}`,
+          title: `Project (${defTmpl.name})`,
+          durationSeconds: defTmpl.durationSeconds || 8,
+          script: {
+            ...PRESET_PROJECTS[0].script,
+            ...defTmpl.script,
+          },
+          adjust: {
+            ...PRESET_PROJECTS[0].adjust,
+            ...defTmpl.adjust,
+          },
+          audio: {
+            ...PRESET_PROJECTS[0].audio,
+            ...defTmpl.audio,
+          },
+        };
+      }
+    } catch {}
+
+    return PRESET_PROJECTS[0];
+  });
+
   const [loadedMedia, setLoadedMedia] = useState<HTMLImageElement | HTMLVideoElement | null>(null);
   const [loadedBgMedia, setLoadedBgMedia] = useState<HTMLImageElement | HTMLVideoElement | null>(null);
   const [activeTopTab, setActiveTopTab] = useState<'create' | 'export' | 'history'>('create');
   const [workspaceSubTab, setWorkspaceSubTab] = useState<'script' | 'media' | 'adjust' | 'sound'>('script');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isProjectsModalOpen, setIsProjectsModalOpen] = useState(false);
+  const [isPresetModalOpen, setIsPresetModalOpen] = useState(false);
   const [savedVideos, setSavedVideos] = useState<ExportedVideo[]>([]);
+  const [projectsCount, setProjectsCount] = useState<number>(() => getSavedProjects().length);
+  const [templatesCount, setTemplatesCount] = useState<number>(() => getUserTemplates().length);
+  const [saveNotification, setSaveNotification] = useState<string | null>(null);
+
   const [cropModalTarget, setCropModalTarget] = useState<{
     isOpen: boolean;
     url: string;
@@ -146,6 +212,97 @@ export default function App() {
     });
   };
 
+  // Save current project manually (or via Ctrl+S)
+  const handleSaveCurrentProject = () => {
+    try {
+      saveProjectRecord(project);
+      setProjectsCount(getSavedProjects().length);
+      setSaveNotification('Project successfully saved to drafts!');
+      setTimeout(() => setSaveNotification(null), 2500);
+    } catch (err) {
+      console.warn('Failed to save project:', err);
+    }
+  };
+
+  // Apply a saved template / preset
+  const handleApplyUserTemplate = (template: SavedUserTemplate) => {
+    setProject((prev) => ({
+      ...prev,
+      durationSeconds: template.durationSeconds || prev.durationSeconds,
+      script: {
+        ...prev.script,
+        ...template.script,
+        // Preserve current script text while applying styles
+        text: prev.script.text,
+      },
+      adjust: {
+        ...prev.adjust,
+        ...template.adjust,
+      },
+      audio: {
+        ...prev.audio,
+        ...template.audio,
+      },
+    }));
+    setTemplatesCount(getUserTemplates().length);
+    setSaveNotification(`Applied template "${template.name}"!`);
+    setTimeout(() => setSaveNotification(null), 2500);
+  };
+
+  // Start new project
+  const handleStartNewProject = () => {
+    const defTmpl = getDefaultUserTemplate();
+    const newId = `proj-${Date.now()}`;
+    if (defTmpl) {
+      setProject({
+        ...PRESET_PROJECTS[0],
+        id: newId,
+        title: 'New Video Project',
+        durationSeconds: defTmpl.durationSeconds || 8,
+        script: {
+          ...PRESET_PROJECTS[0].script,
+          ...defTmpl.script,
+        },
+        adjust: {
+          ...PRESET_PROJECTS[0].adjust,
+          ...defTmpl.adjust,
+        },
+        audio: {
+          ...PRESET_PROJECTS[0].audio,
+          ...defTmpl.audio,
+        },
+      });
+    } else {
+      setProject({
+        ...PRESET_PROJECTS[0],
+        id: newId,
+        title: 'New Video Project',
+      });
+    }
+    setSaveNotification('Created new project!');
+    setTimeout(() => setSaveNotification(null), 2500);
+  };
+
+  // Auto-save draft debounced
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveDraftProject(project);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [project]);
+
+  // Global Ctrl+S / Cmd+S save hotkey
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveCurrentProject();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [project]);
+
   return (
     <div className={`min-h-screen ${activeTheme.rootBg} ${activeTheme.mainText} flex flex-col font-sans transition-colors duration-200 selection:bg-rose-600 selection:text-white`}>
       {/* Top Header Navigation */}
@@ -162,6 +319,16 @@ export default function App() {
           }
         }}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        onOpenProjectsModal={() => {
+          setProjectsCount(getSavedProjects().length);
+          setIsProjectsModalOpen(true);
+        }}
+        onOpenPresetModal={() => {
+          setTemplatesCount(getUserTemplates().length);
+          setIsPresetModalOpen(true);
+        }}
+        onSaveProject={handleSaveCurrentProject}
+        projectsCount={projectsCount}
         savedCount={savedVideos.length}
         activeTheme={activeTheme}
         onSelectTheme={handleSelectTheme}
@@ -172,14 +339,31 @@ export default function App() {
         {activeTopTab === 'history' ? (
           <SavedLoopsTab
             savedVideos={savedVideos}
+            savedProjects={getSavedProjects()}
+            currentProjectId={project.id}
             onDeleteVideo={handleDeleteExport}
+            onLoadProject={(loaded) => {
+              setProject(loaded);
+              setActiveTopTab('create');
+              setSaveNotification(`Loaded project "${loaded.title}"!`);
+              setTimeout(() => setSaveNotification(null), 2500);
+            }}
+            onDuplicateProject={(id) => {
+              duplicateProjectRecord(id);
+              setProjectsCount(getSavedProjects().length);
+            }}
+            onDeleteProject={(id) => {
+              deleteProjectRecord(id);
+              setProjectsCount(getSavedProjects().length);
+            }}
+            onSaveCurrentProject={handleSaveCurrentProject}
           />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Column: YOUR WORKSPACE - Make your video */}
             <div className={`lg:col-span-7 ${activeTheme.cardBg} border ${activeTheme.cardBorder} rounded-xl p-5 shadow-sm space-y-5 transition-colors duration-200`}>
               {/* Workspace Header */}
-              <div className={`flex items-center justify-between border-b ${activeTheme.cardBorder} pb-3`}>
+              <div className={`flex flex-col sm:flex-row sm:items-center justify-between border-b ${activeTheme.cardBorder} pb-3 gap-2.5`}>
                 <div>
                   <div className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
                     Your Workspace
@@ -188,10 +372,52 @@ export default function App() {
                     Make your video
                   </h1>
                 </div>
-                <div className="text-xs text-neutral-400">
-                  Step 1 of 3 <span className="text-neutral-600">·</span> Design set by creator
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleSaveCurrentProject}
+                    className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border border-neutral-700 hover:border-neutral-600 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                    title="Save current project (Ctrl+S)"
+                  >
+                    <Save className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Save Project</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProjectsCount(getSavedProjects().length);
+                      setIsProjectsModalOpen(true);
+                    }}
+                    className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer"
+                    title="View saved projects & drafts"
+                  >
+                    <FolderKanban className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Projects ({projectsCount})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTemplatesCount(getUserTemplates().length);
+                      setIsPresetModalOpen(true);
+                    }}
+                    className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer"
+                    title="Save or load settings preset"
+                  >
+                    <Bookmark className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Presets ({templatesCount})</span>
+                  </button>
                 </div>
               </div>
+
+              {saveNotification && (
+                <div className="p-2.5 bg-emerald-950/90 border border-emerald-700 text-emerald-200 text-xs font-semibold rounded-xl flex items-center gap-2 animate-in fade-in shadow-md">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{saveNotification}</span>
+                </div>
+              )}
 
               {/* 4 Workspace Categories (Extra Bold, Prominent & Distinctive Studio Tabs) */}
               <div className={`flex items-center border-b ${activeTheme.cardBorder} gap-2 sm:gap-3 overflow-x-auto pb-1 scrollbar-none`}>
@@ -287,6 +513,10 @@ export default function App() {
                     }
                     onNext={() => setWorkspaceSubTab('media')}
                     onLoadPreset={handleLoadPreset}
+                    onOpenSavePresetModal={() => {
+                      setTemplatesCount(getUserTemplates().length);
+                      setIsPresetModalOpen(true);
+                    }}
                   />
                 )}
 
@@ -342,6 +572,10 @@ export default function App() {
                         name: project.mediaName || 'photo.jpg',
                       })
                     }
+                    onOpenSavePresetModal={() => {
+                      setTemplatesCount(getUserTemplates().length);
+                      setIsPresetModalOpen(true);
+                    }}
                   />
                 )}
 
@@ -433,6 +667,28 @@ export default function App() {
           }}
         />
       )}
+
+      {/* Projects & Drafts Manager Modal */}
+      <ProjectsManagerModal
+        isOpen={isProjectsModalOpen}
+        currentProject={project}
+        onLoadProject={(loadedProj) => {
+          setProject(loadedProj);
+          setSaveNotification(`Loaded project "${loadedProj.title}"!`);
+          setTimeout(() => setSaveNotification(null), 2500);
+        }}
+        onSaveCurrent={handleSaveCurrentProject}
+        onStartNewProject={handleStartNewProject}
+        onClose={() => setIsProjectsModalOpen(false)}
+      />
+
+      {/* Save & Load Settings Preset Modal */}
+      <SavePresetModal
+        isOpen={isPresetModalOpen}
+        project={project}
+        onApplyTemplate={handleApplyUserTemplate}
+        onClose={() => setIsPresetModalOpen(false)}
+      />
     </div>
   );
 }

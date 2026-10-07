@@ -20,6 +20,7 @@ import {
   Tag,
   Bold,
   Italic,
+  Bookmark,
 } from 'lucide-react';
 
 interface ScriptTabProps {
@@ -27,6 +28,7 @@ interface ScriptTabProps {
   onChange: (updated: Partial<ScriptSettings>) => void;
   onNext: () => void;
   onLoadPreset: (presetId: string) => void;
+  onOpenSavePresetModal?: () => void;
 }
 
 export const ScriptTab: React.FC<ScriptTabProps> = ({
@@ -34,6 +36,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
   onChange,
   onNext,
   onLoadPreset,
+  onOpenSavePresetModal,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [selectedText, setSelectedText] = useState<string>('');
@@ -981,8 +984,21 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
               Viral Shorts, Urdu Nastaliq, Cyberpunk ya Cinema style 1-click mein apply karein.
             </p>
           </div>
-          <div className="text-[10px] text-rose-400 font-mono font-bold bg-neutral-900 border border-neutral-800 px-2 py-0.5 rounded-full shrink-0 self-start sm:self-auto">
-            {TEXT_STYLE_PRESETS.length} Styles Available
+          <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+            {onOpenSavePresetModal && (
+              <button
+                type="button"
+                onClick={onOpenSavePresetModal}
+                className="px-2.5 py-1 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 hover:border-amber-500/70 text-xs font-bold text-amber-300 transition-colors flex items-center gap-1 cursor-pointer shadow-sm"
+                title="Save current font, color & box settings as your custom preset"
+              >
+                <Bookmark className="w-3.5 h-3.5 text-amber-400" />
+                <span>Save Style Preset</span>
+              </button>
+            )}
+            <div className="text-[10px] text-rose-400 font-mono font-bold bg-neutral-900 border border-neutral-800 px-2 py-0.5 rounded-full">
+              {TEXT_STYLE_PRESETS.length} Styles
+            </div>
           </div>
         </div>
 

@@ -13,6 +13,7 @@ import {
   EyeOff,
   Trash2,
   Crop,
+  Bookmark,
 } from 'lucide-react';
 
 interface AdjustPictureTabProps {
@@ -21,6 +22,7 @@ interface AdjustPictureTabProps {
   onPreviewAndCreate: () => void;
   onNextToSound?: () => void;
   onOpenCrop?: () => void;
+  onOpenSavePresetModal?: () => void;
 }
 
 export const AdjustPictureTab: React.FC<AdjustPictureTabProps> = ({
@@ -29,6 +31,7 @@ export const AdjustPictureTab: React.FC<AdjustPictureTabProps> = ({
   onPreviewAndCreate,
   onNextToSound,
   onOpenCrop,
+  onOpenSavePresetModal,
 }) => {
   const bgFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -572,6 +575,28 @@ export const AdjustPictureTab: React.FC<AdjustPictureTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Save Settings as Preset Bar */}
+      {onOpenSavePresetModal && (
+        <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold text-neutral-200 flex items-center gap-1.5">
+              <Bookmark className="w-3.5 h-3.5 text-amber-400" />
+              <span>Save Current Picture & Blur Setup</span>
+            </div>
+            <div className="text-[11px] text-neutral-400">
+              Save your zoom, blur, and motion settings as a reusable template.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenSavePresetModal}
+            className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-amber-300 border border-neutral-700 hover:border-amber-500/60 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 shadow-sm"
+          >
+            Save Preset
+          </button>
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
