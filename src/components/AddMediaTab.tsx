@@ -1,6 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { Upload, Image as ImageIcon, X, Check, Film, Plus, Layers, Sparkles, Crop } from 'lucide-react';
 import { ImageCropModal } from './ImageCropModal';
+import dogImage from '../assets/images/vintage_german_shepherd_etzel_1790500289989.jpg';
+import jazzImage from '../assets/images/vintage_jazz_singer_stage_1790500311794.jpg';
 
 interface MediaItem {
   id: string;
@@ -32,13 +34,13 @@ export const AddMediaTab: React.FC<AddMediaTabProps> = ({
   const [mediaList, setMediaList] = useState<MediaItem[]>([
     {
       id: 'default-dog',
-      url: '/src/assets/images/vintage_german_shepherd_etzel_1790500289989.jpg',
+      url: dogImage,
       name: 'vintage_german_shepherd_etzel.jpg',
       type: 'image',
     },
     {
       id: 'default-jazz',
-      url: '/src/assets/images/vintage_jazz_singer_stage_1790500311794.jpg',
+      url: jazzImage,
       name: 'vintage_jazz_singer_stage.jpg',
       type: 'image',
     },
