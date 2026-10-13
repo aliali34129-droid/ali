@@ -1,0 +1,308 @@
+import { VideoProject, RenderProgress } from '../types';
+import { renderCanvasFrame } from './canvasRenderer';
+import { createLoopAudioBuffer } from './audioGenerator';
+import fixWebmDuration from 'fix-webm-duration';
+
+export interface ExportResult {
+  videoBlob: Blob;
+  videoUrl: string;
+  posterBlob: Blob;
+  posterUrl: string;
+  mimeType: string;
+  durationSec: number;
+}
+
+export class VideoRendererEngine {
+  private abortController: AbortController | null = null;
+
+  public cancel() {
+    if (this.abortController) {
+      this.abortController.abort();
+    }
+  }
+
+  public async renderVideo(
+    project: VideoProject,
+    img: HTMLImageElement | HTMLVideoElement,
+    onProgress: (progress: RenderProgress) => void,
+    bgImg?: HTMLImageElement | HTMLVideoElement | null
+  ): Promise<ExportResult> {
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+
+    const width = project.resolution === '1080p' ? 1080 : 720;
+    const height = project.resolution === '1080p' ? 1920 : 1280;
+    const fps = project.fps || 30;
+    const duration = Math.max(2, Math.min(10, project.durationSeconds || 8.0));
+    const targetDurationMs = duration * 1000;
+    const totalFrames = Math.round(duration * fps);
+
+    // Create offscreen canvas for rendering
+    const renderCanvas = document.createElement('canvas');
+    renderCanvas.width = width;
+    renderCanvas.height = height;
+
+    // Render first frame as poster
+    renderCanvasFrame(renderCanvas, project, img, 0, bgImg);
+    const posterBlob = await new Promise<Blob>((resolve) => {
+      renderCanvas.toBlob((b) => resolve(b || new Blob()), 'image/png');
+    });
+    const posterUrl = URL.createObjectURL(posterBlob);
+
+    // Setup MediaStream from canvas
+    const stream = renderCanvas.captureStream(fps);
+
+    // Setup Audio if enabled
+    let audioCtx: AudioContext | null = null;
+    let audioSourceNode: AudioBufferSourceNode | null = null;
+
+    if (project.audio.enabled && (project.audio.customAudioUrl || (project.audio.ambientTrack && project.audio.ambientTrack !== 'none'))) {
+      try {
+        const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        audioCtx = new AudioContextClass();
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+        const dest = audioCtx.createMediaStreamDestination();
+        
+        let audioBuffer: AudioBuffer | null = null;
+
+        if (project.audio.customAudioUrl) {
+          const resp = await fetch(project.audio.customAudioUrl);
+          const arrayBuffer = await resp.arrayBuffer();
+          audioBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
+            audioCtx!.decodeAudioData(arrayBuffer.slice(0), resolve, reject);
+          });
+        } else if (project.audio.ambientTrack && project.audio.ambientTrack !== 'none') {
+          audioBuffer = await createLoopAudioBuffer(audioCtx, project.audio.ambientTrack, duration);
+        }
+
+        if (audioBuffer) {
+          audioSourceNode = audioCtx.createBufferSource();
+          audioSourceNode.buffer = audioBuffer;
+
+          const audioStartTime = Math.max(0, project.audio.startTime || 0);
+          const isLooping = project.audio.loop ?? true;
+
+          audioSourceNode.loop = isLooping;
+          if (isLooping && audioBuffer.duration > duration) {
+            audioSourceNode.loopStart = audioStartTime;
+            audioSourceNode.loopEnd = Math.min(audioBuffer.duration, audioStartTime + duration);
+          }
+
+          const gainNode = audioCtx.createGain();
+          const baseVolume = project.audio.volume ?? 0.7;
+
+          // Handle Fade In & Fade Out
+          if (project.audio.fadeIn) {
+            gainNode.gain.setValueAtTime(0.001, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(baseVolume, audioCtx.currentTime + 0.5);
+          } else {
+            gainNode.gain.setValueAtTime(baseVolume, audioCtx.currentTime);
+          }
+
+          if (project.audio.fadeOut) {
+            const fadeStart = Math.max(0, duration - 0.6);
+            gainNode.gain.setValueAtTime(baseVolume, audioCtx.currentTime + fadeStart);
+            gainNode.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+          }
+
+          audioSourceNode.connect(gainNode);
+          gainNode.connect(dest);
+
+          dest.stream.getAudioTracks().forEach((track) => {
+            stream.addTrack(track);
+          });
+        }
+      } catch (err) {
+        console.warn('Audio stream setup warning:', err);
+      }
+    }
+
+    // Determine supported mime type
+    const mimeTypes = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/mp4',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm',
+    ];
+    let selectedMimeType = 'video/webm';
+    for (const mime of mimeTypes) {
+      if (MediaRecorder.isTypeSupported(mime)) {
+        selectedMimeType = mime;
+        break;
+      }
+    }
+
+    const recordedChunks: Blob[] = [];
+    const mediaRecorder = new MediaRecorder(stream, {
+      mimeType: selectedMimeType,
+      videoBitsPerSecond: project.resolution === '1080p' ? 8_000_000 : 4_000_000,
+    });
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        recordedChunks.push(e.data);
+      }
+    };
+
+    return new Promise<ExportResult>((resolve, reject) => {
+      const startTime = performance.now();
+      let animId: number | null = null;
+      let timerId: any = null;
+      let isCompleted = false;
+
+      const cleanupAndStop = () => {
+        if (isCompleted) return;
+        isCompleted = true;
+
+        if (animId) cancelAnimationFrame(animId);
+        if (timerId) clearTimeout(timerId);
+
+        if (mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      };
+
+      // Safety timeout giving enough buffer for all frames to be captured
+      const safetyTimeout = setTimeout(() => {
+        cleanupAndStop();
+      }, targetDurationMs + 250);
+
+      mediaRecorder.onstop = () => {
+        clearTimeout(safetyTimeout);
+        if (animId) cancelAnimationFrame(animId);
+        if (timerId) clearTimeout(timerId);
+
+        if (audioSourceNode) {
+          try {
+            audioSourceNode.stop();
+          } catch {
+            // ignore
+          }
+        }
+        if (audioCtx) {
+          try {
+            audioCtx.close();
+          } catch {
+            // ignore
+          }
+        }
+
+        // Stop all tracks so media stream doesn't leak into subsequent renders
+        stream.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch {
+            // ignore
+          }
+        });
+
+        const rawBlob = new Blob(recordedChunks, { type: selectedMimeType });
+
+        // Fix Chromium WebM duration bug so players/browsers display exact requested duration
+        if (selectedMimeType.includes('webm')) {
+          try {
+            const fixFn = (fixWebmDuration as any)?.default || fixWebmDuration || (typeof window !== 'undefined' && (window as any).ysFixWebmDuration);
+            if (typeof fixFn === 'function') {
+              fixFn(rawBlob, targetDurationMs, (fixedBlob: Blob) => {
+                const videoUrl = URL.createObjectURL(fixedBlob);
+                resolve({
+                  videoBlob: fixedBlob,
+                  videoUrl,
+                  posterBlob,
+                  posterUrl,
+                  mimeType: selectedMimeType,
+                  durationSec: duration,
+                });
+              });
+              return;
+            }
+          } catch (fixErr) {
+            console.warn('Could not fix webm duration:', fixErr);
+          }
+        }
+
+        const videoUrl = URL.createObjectURL(rawBlob);
+        resolve({
+          videoBlob: rawBlob,
+          videoUrl,
+          posterBlob,
+          posterUrl,
+          mimeType: selectedMimeType,
+          durationSec: duration,
+        });
+      };
+
+      mediaRecorder.onerror = (e) => {
+        clearTimeout(safetyTimeout);
+        cleanupAndStop();
+        reject(new Error(`Recording failed: ${e}`));
+      };
+
+      mediaRecorder.start();
+      if (audioSourceNode) {
+        try {
+          const audioOffset = Math.max(0, project.audio.startTime || 0);
+          audioSourceNode.start(0, audioOffset);
+        } catch (err) {
+          console.warn('Could not start audio node:', err);
+        }
+      }
+
+      // Real-time animation loop synchronized to exact duration
+      const tick = () => {
+        if (signal.aborted) {
+          clearTimeout(safetyTimeout);
+          cleanupAndStop();
+          reject(new Error('Rendering cancelled by user'));
+          return;
+        }
+
+        const now = performance.now();
+        const elapsedMs = now - startTime;
+
+        // Render slightly past targetDurationMs to ensure the last full second frame is in the stream
+        if (elapsedMs >= targetDurationMs + 100) {
+          // Render final loop-closed frame
+          renderCanvasFrame(renderCanvas, project, img, 0, bgImg);
+
+          onProgress({
+            isRendering: true,
+            currentFrame: totalFrames,
+            totalFrames,
+            progressPercent: 100,
+            timeRemainingSec: 0,
+          });
+
+          cleanupAndStop();
+          return;
+        }
+
+        const normalizedTime = Math.min(1.0, elapsedMs / targetDurationMs);
+        renderCanvasFrame(renderCanvas, project, img, normalizedTime, bgImg);
+
+        const currentFrame = Math.min(totalFrames, Math.round((elapsedMs / targetDurationMs) * totalFrames));
+        const progressPercent = Math.min(99, Math.round((elapsedMs / targetDurationMs) * 100));
+        const timeRemainingSec = Math.max(0, Math.ceil((targetDurationMs - elapsedMs) / 1000));
+
+        onProgress({
+          isRendering: true,
+          currentFrame,
+          totalFrames,
+          progressPercent,
+          timeRemainingSec,
+        });
+
+        if (document.hidden) {
+          timerId = setTimeout(tick, 1000 / fps);
+        } else {
+          animId = requestAnimationFrame(tick);
+        }
+      };
+
+      animId = requestAnimationFrame(tick);
+    });
+  }
+}

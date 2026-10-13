@@ -1,0 +1,8 @@
+{
+  "name": "Remix LoopReel Studio - 8s Vertical Video Maker",
+  "description": "Professional 8-second seamless loop video generator for Shorts and Reels with blurred background, photo adjustment, and customizable text cards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

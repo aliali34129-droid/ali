@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ShortX - Redirecting...</title>
+    <script>
+      // Single Page Apps for GitHub Pages
+      // Redirects 404s back to root index.html preserving URL parameters
+      (function() {
+        var path = window.location.pathname;
+        // Determine the base path (e.g. /repo-name/ or /)
+        var segments = path.split('/').filter(Boolean);
+        // If hosted on username.github.io/repo, the first segment is the repo name
+        var repoName = segments.length > 0 ? '/' + segments[0] + '/' : '/';
+        window.location.replace(window.location.origin + repoName);
+      })();
+    </script>
+  </head>
+  <body>
+    <p style="font-family: sans-serif; text-align: center; margin-top: 50px; color: #888;">
+      Redirecting to ShortX Studio...
+    </p>
+  </body>
+</html>
