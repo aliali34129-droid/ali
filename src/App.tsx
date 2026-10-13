@@ -25,6 +25,7 @@ import {
   getUserTemplates,
   getDefaultUserTemplate,
 } from './utils/userTemplates';
+import { extractAndCleanScriptTags } from './utils/keywordExtractor';
 import {
   FileText,
   Image as ImageIcon,
@@ -51,6 +52,16 @@ export default function App() {
         };
         if (typeof mergedScript.text !== 'string') {
           mergedScript.text = base.script.text;
+        } else if (mergedScript.text.includes('[') && mergedScript.text.includes(']')) {
+          const { cleanText, extractedColors, extractedKeywords } = extractAndCleanScriptTags(mergedScript.text);
+          mergedScript.text = cleanText;
+          mergedScript.wordColors = {
+            ...(mergedScript.wordColors || {}),
+            ...extractedColors,
+          };
+          if (extractedKeywords.length > 0) {
+            mergedScript.customKeywords = Array.from(new Set([...(mergedScript.customKeywords || []), ...extractedKeywords]));
+          }
         }
 
         const mergedAdjust = {

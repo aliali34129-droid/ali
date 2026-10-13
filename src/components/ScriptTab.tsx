@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { ScriptSettings } from '../types';
-import { getActiveHighlights, cleanPunctuation } from '../utils/keywordExtractor';
+import { getActiveHighlights, cleanPunctuation, isWordKeyword, extractAndCleanScriptTags } from '../utils/keywordExtractor';
 import { FONT_FAMILIES_LIST, TEXT_STYLE_PRESETS, TextStylePreset } from '../utils/textStyles';
 import {
   AlignLeft,
@@ -35,10 +35,15 @@ export interface ScriptToken {
 }
 
 /**
- * Tokenizes text preserving character positions and parsing bracket tags like
- * [c:#hex:word], [hl:#hex:word], [hl:#hex,c:#hex:word], [#hex:word], [word]
+ * Tokenizes text preserving character positions and resolving word colors & highlights
+ * without needing raw bracket tags in the user's script text.
  */
-export function parseScriptTokens(text: string): ScriptToken[] {
+export function parseScriptTokens(
+  text: string,
+  wordColors?: Record<string, string>,
+  activeHighlights?: string[],
+  defaultHlColor: string = '#ef4444'
+): ScriptToken[] {
   if (!text) return [];
   const tokens: ScriptToken[] = [];
   const regex = /\[[^\]]+\]|\S+/g;
@@ -91,13 +96,41 @@ export function parseScriptTokens(text: string): ScriptToken[] {
       }
     }
 
+    // Resolve custom word color from wordColors dictionary
+    const cleanPunct = cleanPunctuation(cleanWord);
+    const cleanLower = cleanPunct.toLowerCase();
+
+    if (!textColor && wordColors) {
+      if (wordColors[cleanLower]) {
+        textColor = wordColors[cleanLower];
+      } else if (wordColors[cleanWord.toLowerCase()]) {
+        textColor = wordColors[cleanWord.toLowerCase()];
+      } else if (wordColors[cleanWord]) {
+        textColor = wordColors[cleanWord];
+      } else {
+        for (const [k, v] of Object.entries(wordColors)) {
+          if (cleanPunctuation(k).toLowerCase() === cleanLower || k.toLowerCase() === cleanWord.toLowerCase()) {
+            textColor = v;
+            break;
+          }
+        }
+      }
+    }
+
+    // Resolve highlight status from activeHighlights
+    if (!isHighlighted && activeHighlights && activeHighlights.length > 0) {
+      if (isWordKeyword(cleanWord, activeHighlights)) {
+        isHighlighted = true;
+      }
+    }
+
     tokens.push({
       tokenIndex: idx++,
       raw,
       cleanWord,
       isHighlighted,
       textColor,
-      highlightColor,
+      highlightColor: highlightColor || (isHighlighted ? defaultHlColor : undefined),
       charStart,
       charEnd,
     });
@@ -232,7 +265,10 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
   const currentTextColor = script.textColor || '#ffffff';
 
   // Tokenize story for interactive click-to-highlight view and per-word styling
-  const scriptTokens = useMemo(() => parseScriptTokens(script.text), [script.text]);
+  const scriptTokens = useMemo(
+    () => parseScriptTokens(safeText, wordColors, activeHighlights, highlightColor),
+    [safeText, wordColors, activeHighlights, highlightColor]
+  );
   const activeToken = activeTokenIndex !== null ? scriptTokens.find((t) => t.tokenIndex === activeTokenIndex) || null : null;
 
   // Monitor text selection in textarea
@@ -250,64 +286,113 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
     }
   };
 
-  // Apply ONLY custom text color to the selected word/range in textarea (NO highlight pill)
+  // One-click cleanup for any legacy bracket or color tags in script text
+  const handleCleanAllScriptTags = () => {
+    if (!script.text) return;
+    const { cleanText, extractedColors, extractedKeywords } = extractAndCleanScriptTags(script.text);
+    const nextWordColors = {
+      ...(wordColors || {}),
+      ...extractedColors,
+    };
+    const nextCustom = Array.from(new Set([...customKeywords, ...extractedKeywords]));
+    onChange({
+      text: cleanText,
+      wordColors: nextWordColors,
+      customKeywords: nextCustom,
+    });
+    setSelectedText('');
+    setSelectedRange(null);
+  };
+
+  // Apply ONLY custom text color to the selected word/range (CLEAN: updates wordColors, NO code added to script.text!)
   const handleApplySelectedColor = (color: string) => {
-    if (!selectedRange || !selectedText) return;
-    const currentVal = script.text;
-    const before = currentVal.substring(0, selectedRange.start);
-    const sel = currentVal.substring(selectedRange.start, selectedRange.end);
-    const after = currentVal.substring(selectedRange.end);
-    // Strip existing brackets/tags from inner text
-    const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
-    if (!cleanInner) return;
+    if (!selectedText) return;
+    const cleanWord = selectedText.trim();
+    const cleanKey = cleanPunctuation(cleanWord);
+    if (!cleanKey) return;
 
-    const newText = `${before}[c:${color}:${cleanInner}]${after}`;
+    const nextWordColors = { ...(wordColors || {}), [cleanKey]: color };
+
+    // If script text around selection had legacy bracket tags, clean them out
+    let updatedText = script.text;
+    if (selectedRange) {
+      const sel = script.text.substring(selectedRange.start, selectedRange.end);
+      if (sel.includes('[') || sel.includes(']')) {
+        const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
+        const before = script.text.substring(0, selectedRange.start);
+        const after = script.text.substring(selectedRange.end);
+        updatedText = `${before}${cleanInner}${after}`;
+      }
+    }
+
     onChange({
-      text: newText,
-      highlightMode: 'manual-only',
-      autoHighlightKeywords: false,
+      ...(updatedText !== script.text ? { text: updatedText } : {}),
+      wordColors: nextWordColors,
     });
     setSelectedText('');
     setSelectedRange(null);
   };
 
-  // Apply ONLY highlight to the selected word/range in textarea
+  // Apply ONLY highlight to the selected word/range (CLEAN: adds to customKeywords, NO code added to script.text!)
   const handleApplySelectedHighlight = (hlCol?: string) => {
-    if (!selectedRange || !selectedText) return;
-    const currentVal = script.text;
-    const before = currentVal.substring(0, selectedRange.start);
-    const sel = currentVal.substring(selectedRange.start, selectedRange.end);
-    const after = currentVal.substring(selectedRange.end);
-    const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
-    if (!cleanInner) return;
+    if (!selectedText) return;
+    const cleanWord = selectedText.trim();
+    if (!cleanWord) return;
 
-    const targetHl = hlCol || highlightColor || '#ef4444';
-    const newText = `${before}[hl:${targetHl}:${cleanInner}]${after}`;
+    const nextCustom = Array.from(new Set([...customKeywords, cleanWord]));
+    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== cleanPunctuation(cleanWord));
+
+    let updatedText = script.text;
+    if (selectedRange) {
+      const sel = script.text.substring(selectedRange.start, selectedRange.end);
+      if (sel.includes('[') || sel.includes(']')) {
+        const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
+        const before = script.text.substring(0, selectedRange.start);
+        const after = script.text.substring(selectedRange.end);
+        updatedText = `${before}${cleanInner}${after}`;
+      }
+    }
+
     onChange({
-      text: newText,
-      highlightMode: 'manual-only',
-      autoHighlightKeywords: false,
+      ...(updatedText !== script.text ? { text: updatedText } : {}),
+      customKeywords: nextCustom,
+      excludedKeywords: nextExcluded,
+      highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
+      ...(hlCol ? { highlightColor: hlCol } : {}),
     });
     setSelectedText('');
     setSelectedRange(null);
   };
 
-  // Apply BOTH text color AND highlight to the selected word/range in textarea
+  // Apply BOTH text color AND highlight to the selected word/range (CLEAN: updates wordColors & customKeywords, NO code in script.text!)
   const handleApplySelectedBoth = (txtColor: string, hlCol?: string) => {
-    if (!selectedRange || !selectedText) return;
-    const currentVal = script.text;
-    const before = currentVal.substring(0, selectedRange.start);
-    const sel = currentVal.substring(selectedRange.start, selectedRange.end);
-    const after = currentVal.substring(selectedRange.end);
-    const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
-    if (!cleanInner) return;
+    if (!selectedText) return;
+    const cleanWord = selectedText.trim();
+    const cleanKey = cleanPunctuation(cleanWord);
+    if (!cleanKey) return;
 
-    const targetHl = hlCol || highlightColor || '#ef4444';
-    const newText = `${before}[hl:${targetHl},c:${txtColor}:${cleanInner}]${after}`;
+    const nextWordColors = { ...(wordColors || {}), [cleanKey]: txtColor };
+    const nextCustom = Array.from(new Set([...customKeywords, cleanWord]));
+    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== cleanPunctuation(cleanWord));
+
+    let updatedText = script.text;
+    if (selectedRange) {
+      const sel = script.text.substring(selectedRange.start, selectedRange.end);
+      if (sel.includes('[') || sel.includes(']')) {
+        const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
+        const before = script.text.substring(0, selectedRange.start);
+        const after = script.text.substring(selectedRange.end);
+        updatedText = `${before}${cleanInner}${after}`;
+      }
+    }
+
     onChange({
-      text: newText,
-      highlightMode: 'manual-only',
-      autoHighlightKeywords: false,
+      ...(updatedText !== script.text ? { text: updatedText } : {}),
+      wordColors: nextWordColors,
+      customKeywords: nextCustom,
+      excludedKeywords: nextExcluded,
+      highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
+      ...(hlCol ? { highlightColor: hlCol } : {}),
     });
     setSelectedText('');
     setSelectedRange(null);
@@ -315,93 +400,125 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
 
   // Clear / reset formatting on the selected word/range
   const handleApplySelectedClear = () => {
-    if (!selectedRange || !selectedText) return;
-    const currentVal = script.text;
-    const before = currentVal.substring(0, selectedRange.start);
-    const sel = currentVal.substring(selectedRange.start, selectedRange.end);
-    const after = currentVal.substring(selectedRange.end);
-    const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
+    if (!selectedText) return;
+    const cleanKey = cleanPunctuation(selectedText);
+    const nextWordColors = { ...(wordColors || {}) };
+    delete nextWordColors[cleanKey];
+    delete nextWordColors[selectedText.toLowerCase()];
+    const nextCustom = customKeywords.filter((k) => cleanPunctuation(k) !== cleanKey);
 
-    const newText = `${before}${cleanInner}${after}`;
+    let updatedText = script.text;
+    if (selectedRange) {
+      const sel = script.text.substring(selectedRange.start, selectedRange.end);
+      if (sel.includes('[') || sel.includes(']')) {
+        const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
+        const before = script.text.substring(0, selectedRange.start);
+        const after = script.text.substring(selectedRange.end);
+        updatedText = `${before}${cleanInner}${after}`;
+      }
+    }
+
     onChange({
-      text: newText,
+      ...(updatedText !== script.text ? { text: updatedText } : {}),
+      wordColors: nextWordColors,
+      customKeywords: nextCustom,
     });
     setSelectedText('');
     setSelectedRange(null);
   };
 
-  // Wrap selected text directly with [bracket] syntax in textarea
+  // Quick highlight for selected text
   const handleWrapBrackets = () => {
-    if (!textareaRef.current) return;
-    const start = textareaRef.current.selectionStart;
-    const end = textareaRef.current.selectionEnd;
-    const currentVal = textareaRef.current.value;
-
-    if (start !== end) {
-      const selected = currentVal.substring(start, end).trim();
-      if (!selected) return;
-
-      const before = currentVal.substring(0, start);
-      const after = currentVal.substring(end);
-      const cleanInner = selected.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
-      const newText = `${before}[${cleanInner}]${after}`;
-
-      onChange({
-        text: newText,
-        highlightMode: 'manual-only',
-        autoHighlightKeywords: false,
-      });
-      setSelectedText('');
-      setSelectedRange(null);
-    }
+    if (!selectedText) return;
+    handleApplySelectedHighlight();
   };
 
-  // Token-specific actions: Modify ONLY the clicked token at its exact character position
+  // Token-specific actions: Modify ONLY the clicked token WITHOUT adding any code/tag to script.text!
   const handleTokenColor = (token: ScriptToken, color: string) => {
-    const currentVal = script.text;
-    const before = currentVal.substring(0, token.charStart);
-    const after = currentVal.substring(token.charEnd);
-    const newText = `${before}[c:${color}:${token.cleanWord}]${after}`;
+    const cleanKey = cleanPunctuation(token.cleanWord);
+    if (!cleanKey) return;
+    const nextWordColors = { ...(wordColors || {}), [cleanKey]: color };
+
+    // If token in text was formatted with legacy bracket syntax, clean it out so text has NO brackets!
+    let updatedText = script.text;
+    if (token.raw !== token.cleanWord && (token.raw.includes('[') || token.raw.includes(']'))) {
+      const before = script.text.substring(0, token.charStart);
+      const after = script.text.substring(token.charEnd);
+      updatedText = `${before}${token.cleanWord}${after}`;
+    }
+
     onChange({
-      text: newText,
-      highlightMode: 'manual-only',
-      autoHighlightKeywords: false,
+      ...(updatedText !== script.text ? { text: updatedText } : {}),
+      wordColors: nextWordColors,
     });
   };
 
   const handleTokenHighlight = (token: ScriptToken, hlCol?: string) => {
-    const currentVal = script.text;
-    const before = currentVal.substring(0, token.charStart);
-    const after = currentVal.substring(token.charEnd);
-    const targetHl = hlCol || highlightColor || '#ef4444';
-    const newText = `${before}[hl:${targetHl}:${token.cleanWord}]${after}`;
+    const cleanWord = token.cleanWord.trim();
+    if (!cleanWord) return;
+    const nextCustom = Array.from(new Set([...customKeywords, cleanWord]));
+    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== cleanPunctuation(cleanWord));
+
+    let updatedText = script.text;
+    if (token.raw !== token.cleanWord && (token.raw.includes('[') || token.raw.includes(']'))) {
+      const before = script.text.substring(0, token.charStart);
+      const after = script.text.substring(token.charEnd);
+      updatedText = `${before}${token.cleanWord}${after}`;
+    }
+
     onChange({
-      text: newText,
-      highlightMode: 'manual-only',
-      autoHighlightKeywords: false,
+      ...(updatedText !== script.text ? { text: updatedText } : {}),
+      customKeywords: nextCustom,
+      excludedKeywords: nextExcluded,
+      highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
+      ...(hlCol ? { highlightColor: hlCol } : {}),
     });
   };
 
   const handleTokenBoth = (token: ScriptToken, txtColor: string, hlCol?: string) => {
-    const currentVal = script.text;
-    const before = currentVal.substring(0, token.charStart);
-    const after = currentVal.substring(token.charEnd);
-    const targetHl = hlCol || highlightColor || '#ef4444';
-    const newText = `${before}[hl:${targetHl},c:${txtColor}:${token.cleanWord}]${after}`;
+    const cleanWord = token.cleanWord.trim();
+    const cleanKey = cleanPunctuation(cleanWord);
+    if (!cleanKey) return;
+
+    const nextWordColors = { ...(wordColors || {}), [cleanKey]: txtColor };
+    const nextCustom = Array.from(new Set([...customKeywords, cleanWord]));
+    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== cleanPunctuation(cleanWord));
+
+    let updatedText = script.text;
+    if (token.raw !== token.cleanWord && (token.raw.includes('[') || token.raw.includes(']'))) {
+      const before = script.text.substring(0, token.charStart);
+      const after = script.text.substring(token.charEnd);
+      updatedText = `${before}${token.cleanWord}${after}`;
+    }
+
     onChange({
-      text: newText,
-      highlightMode: 'manual-only',
-      autoHighlightKeywords: false,
+      ...(updatedText !== script.text ? { text: updatedText } : {}),
+      wordColors: nextWordColors,
+      customKeywords: nextCustom,
+      excludedKeywords: nextExcluded,
+      highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
+      ...(hlCol ? { highlightColor: hlCol } : {}),
     });
   };
 
   const handleTokenClear = (token: ScriptToken) => {
-    const currentVal = script.text;
-    const before = currentVal.substring(0, token.charStart);
-    const after = currentVal.substring(token.charEnd);
-    const newText = `${before}${token.cleanWord}${after}`;
+    const cleanKey = cleanPunctuation(token.cleanWord);
+    const nextWordColors = { ...(wordColors || {}) };
+    delete nextWordColors[cleanKey];
+    delete nextWordColors[token.cleanWord.toLowerCase()];
+    const nextCustom = customKeywords.filter((k) => cleanPunctuation(k) !== cleanKey);
+
+    let updatedText = script.text;
+    if (token.raw !== token.cleanWord && (token.raw.includes('[') || token.raw.includes(']'))) {
+      const before = script.text.substring(0, token.charStart);
+      const after = script.text.substring(token.charEnd);
+      updatedText = `${before}${token.cleanWord}${after}`;
+    }
+
     onChange({
-      text: newText,
+      ...(updatedText !== script.text ? { text: updatedText } : {}),
+      wordColors: nextWordColors,
+      customKeywords: nextCustom,
     });
     setActiveTokenIndex(null);
   };
@@ -768,10 +885,10 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                   <button
                     type="button"
                     onClick={handleWrapBrackets}
-                    className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 font-mono font-bold text-[11px] rounded border border-neutral-700 transition-colors cursor-pointer"
-                    title="Wrap with [ ] in text"
+                    className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[11px] font-semibold rounded border border-neutral-700 transition-colors cursor-pointer"
+                    title="Highlight selected text"
                   >
-                    [ ]
+                    Highlight
                   </button>
                 </div>
               </div>
@@ -780,7 +897,24 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
         ) : (
           <div className="text-[11px] text-neutral-400 mb-1.5 flex items-center gap-1">
             <span>💡</span>
-            <span>Kisi bhi lafz ko mouse se select karein ya neeche click karein — sirf usi lafz ka color ya highlight change hoga!</span>
+            <span>Kisi bhi lafz ko mouse se select karein ya neeche click karein — script text saaf rahega aur color apply ho jayega!</span>
+          </div>
+        )}
+
+        {script.text.includes('[') && (
+          <div className="flex items-center justify-between p-2.5 bg-rose-950/50 border border-rose-500/50 rounded-lg text-xs text-rose-200 mb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-base">✨</span>
+              <span>Script mein purane color codes ya brackets mojood hain — inhein saaf karein?</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleCleanAllScriptTags}
+              className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded shadow-sm text-xs cursor-pointer transition-colors"
+              title="Remove all bracket tags from script while keeping their colors"
+            >
+              Codes Hatao (Clean Script)
+            </button>
           </div>
         )}
 

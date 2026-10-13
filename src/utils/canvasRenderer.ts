@@ -217,6 +217,24 @@ export function wrapFormattedWords(
         }
       }
 
+      // Check custom word colors from wordColors map (whether inside or outside brackets)
+      if (!wordColor && wordColors) {
+        const cleanLower = cleanPunctuation(rawToken).toLowerCase();
+        const rawLower = rawToken.toLowerCase();
+        if (wordColors[cleanLower]) {
+          wordColor = wordColors[cleanLower];
+        } else if (wordColors[rawLower]) {
+          wordColor = wordColors[rawLower];
+        } else {
+          for (const [kw, c] of Object.entries(wordColors)) {
+            if (cleanPunctuation(kw).toLowerCase() === cleanLower || kw.toLowerCase() === rawLower) {
+              wordColor = c;
+              break;
+            }
+          }
+        }
+      }
+
       if (endsBracket) {
         isInsideBracket = false;
         currentBracketTextColor = undefined;

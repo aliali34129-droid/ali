@@ -66,6 +66,65 @@ export function extractBracketHighlights(text: string): string[] {
 }
 
 /**
+ * Extracts and cleans legacy bracket formatting codes from script text,
+ * migrating their colors into wordColors map and keywords into customKeywords list,
+ * leaving pure clean text in the script.
+ */
+export function extractAndCleanScriptTags(text: string): {
+  cleanText: string;
+  extractedColors: Record<string, string>;
+  extractedKeywords: string[];
+} {
+  if (!text) return { cleanText: '', extractedColors: {}, extractedKeywords: [] };
+  const extractedColors: Record<string, string> = {};
+  const extractedKeywords: string[] = [];
+
+  const cleanText = text.replace(/\[([^\]]+)\]/g, (_match, inner: string) => {
+    const compoundMatch1 = inner.match(/^(?:hl(?::#([0-9a-fA-F]{3,8}))?|#([0-9a-fA-F]{3,8})),c:#([0-9a-fA-F]{3,8}):(.*)$/i);
+    const compoundMatch2 = inner.match(/^c:#([0-9a-fA-F]{3,8}),(?:hl(?::#([0-9a-fA-F]{3,8}))?|#([0-9a-fA-F]{3,8})):(.*)$/i);
+    const colorOnlyMatch = inner.match(/^(?:c|color):#([0-9a-fA-F]{3,8}):(.*)$/i);
+    const hlMatch = inner.match(/^hl(?::#([0-9a-fA-F]{3,8}))?:(.*)$/i);
+    const hexOnlyMatch = inner.match(/^#([0-9a-fA-F]{3,8}):(.*)$/i);
+
+    if (compoundMatch1) {
+      const col = '#' + compoundMatch1[3];
+      const word = compoundMatch1[4];
+      extractedColors[cleanPunctuation(word)] = col;
+      extractedKeywords.push(word.trim());
+      return word;
+    }
+    if (compoundMatch2) {
+      const col = '#' + compoundMatch2[1];
+      const word = compoundMatch2[4];
+      extractedColors[cleanPunctuation(word)] = col;
+      extractedKeywords.push(word.trim());
+      return word;
+    }
+    if (colorOnlyMatch) {
+      const col = '#' + colorOnlyMatch[1];
+      const word = colorOnlyMatch[2];
+      extractedColors[cleanPunctuation(word)] = col;
+      return word;
+    }
+    if (hlMatch) {
+      const word = hlMatch[2];
+      extractedKeywords.push(word.trim());
+      return word;
+    }
+    if (hexOnlyMatch) {
+      const col = '#' + hexOnlyMatch[1];
+      const word = hexOnlyMatch[2];
+      extractedColors[cleanPunctuation(word)] = col;
+      return word;
+    }
+    extractedKeywords.push(inner.trim());
+    return inner;
+  });
+
+  return { cleanText, extractedColors, extractedKeywords };
+}
+
+/**
  * Clean punctuation from word for comparison
  */
 export function cleanPunctuation(str: string): string {
