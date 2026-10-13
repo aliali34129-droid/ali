@@ -28,8 +28,16 @@ export interface ScriptSettings {
   highlightColor?: string; // default '#ef4444' (Red)
   highlightStyle?: 'text' | 'pill' | 'both'; // default 'text'
   customKeywords?: string[]; // additional custom / manually selected keywords
-  wordColors?: Record<string, string>; // custom color for each specific word or phrase (e.g. { 'strongheart': '#ef4444', 'etzel': '#38bdf8' })
+  wordColors?: Record<string, string>; // custom color for each specific word or phrase (e.g. { 'strongheart': '#ef4444' })
+  tokenStyles?: Record<number, WordTokenStyle>; // Exact per-word styling by token index: styles ONLY the selected instance, not all occurrences!
   excludedKeywords?: string[]; // keywords excluded by user
+}
+
+export interface WordTokenStyle {
+  color?: string; // custom text color for this exact word token
+  isHighlighted?: boolean; // whether this exact word token has highlight
+  highlightColor?: string; // custom highlight color for this exact word token
+  word?: string; // snapshot of the word text
 }
 
 export interface AdjustSettings {

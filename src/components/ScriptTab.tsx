@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { ScriptSettings } from '../types';
+import { ScriptSettings, WordTokenStyle } from '../types';
 import { getActiveHighlights, cleanPunctuation, isWordKeyword, extractAndCleanScriptTags } from '../utils/keywordExtractor';
 import { FONT_FAMILIES_LIST, TEXT_STYLE_PRESETS, TextStylePreset } from '../utils/textStyles';
 import {
@@ -40,6 +40,7 @@ export interface ScriptToken {
  */
 export function parseScriptTokens(
   text: string,
+  tokenStyles?: Record<number, WordTokenStyle>,
   wordColors?: Record<string, string>,
   activeHighlights?: string[],
   defaultHlColor: string = '#ef4444'
@@ -54,6 +55,7 @@ export function parseScriptTokens(
     const raw = match[0];
     const charStart = match.index;
     const charEnd = match.index + raw.length;
+    const tIdx = idx++;
 
     let isHighlighted = false;
     let textColor: string | undefined = undefined;
@@ -96,7 +98,21 @@ export function parseScriptTokens(
       }
     }
 
-    // Resolve custom word color from wordColors dictionary
+    // 1. Exact token index styling (PRECISION: styles ONLY this exact selected word instance!)
+    const tokenStyle = tokenStyles ? (tokenStyles[tIdx] || tokenStyles[String(tIdx) as any]) : undefined;
+    if (tokenStyle) {
+      if (tokenStyle.color) {
+        textColor = tokenStyle.color;
+      }
+      if (tokenStyle.isHighlighted !== undefined) {
+        isHighlighted = tokenStyle.isHighlighted;
+        if (tokenStyle.highlightColor) {
+          highlightColor = tokenStyle.highlightColor;
+        }
+      }
+    }
+
+    // 2. Fallback to wordColors dictionary if no exact tokenStyle
     const cleanPunct = cleanPunctuation(cleanWord);
     const cleanLower = cleanPunct.toLowerCase();
 
@@ -117,7 +133,7 @@ export function parseScriptTokens(
       }
     }
 
-    // Resolve highlight status from activeHighlights
+    // 3. Highlight fallback from activeHighlights
     if (!isHighlighted && activeHighlights && activeHighlights.length > 0) {
       if (isWordKeyword(cleanWord, activeHighlights)) {
         isHighlighted = true;
@@ -125,7 +141,7 @@ export function parseScriptTokens(
     }
 
     tokens.push({
-      tokenIndex: idx++,
+      tokenIndex: tIdx,
       raw,
       cleanWord,
       isHighlighted,
@@ -266,10 +282,12 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
 
   // Tokenize story for interactive click-to-highlight view and per-word styling
   const scriptTokens = useMemo(
-    () => parseScriptTokens(safeText, wordColors, activeHighlights, highlightColor),
-    [safeText, wordColors, activeHighlights, highlightColor]
+    () => parseScriptTokens(safeText, script.tokenStyles, wordColors, activeHighlights, highlightColor),
+    [safeText, script.tokenStyles, wordColors, activeHighlights, highlightColor]
   );
   const activeToken = activeTokenIndex !== null ? scriptTokens.find((t) => t.tokenIndex === activeTokenIndex) || null : null;
+
+  const savedSelectionRef = useRef<{ start: number; end: number; text: string } | null>(null);
 
   // Monitor text selection in textarea
   const handleSelectTextarea = () => {
@@ -280,10 +298,21 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
       const selected = textareaRef.current.value.substring(start, end);
       setSelectedText(selected.trim());
       setSelectedRange({ start, end });
-    } else {
-      setSelectedText('');
-      setSelectedRange(null);
+      savedSelectionRef.current = { start, end, text: selected.trim() };
     }
+  };
+
+  // Helper to find exact tokens matching user selection in textarea
+  const getSelectedMatchingTokens = (): ScriptToken[] => {
+    const range = selectedRange || savedSelectionRef.current;
+    if (!range) return [];
+    return scriptTokens.filter((t) => {
+      return (
+        (t.charStart >= range.start && t.charEnd <= range.end) ||
+        (t.charStart <= range.start && t.charEnd >= range.end) ||
+        (t.charStart < range.end && t.charEnd > range.start)
+      );
+    });
   };
 
   // One-click cleanup for any legacy bracket or color tags in script text
@@ -302,223 +331,158 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
     });
     setSelectedText('');
     setSelectedRange(null);
+    savedSelectionRef.current = null;
   };
 
-  // Apply ONLY custom text color to the selected word/range (CLEAN: updates wordColors, NO code added to script.text!)
+  // Apply ONLY custom text color to the selected word/range (PRECISION: styles ONLY this selected instance, not all occurrences!)
   const handleApplySelectedColor = (color: string) => {
-    if (!selectedText) return;
-    const cleanWord = selectedText.trim();
-    const cleanKey = cleanPunctuation(cleanWord);
-    if (!cleanKey) return;
+    const matchingTokens = getSelectedMatchingTokens();
+    if (matchingTokens.length === 0) return;
 
-    const nextWordColors = { ...(wordColors || {}), [cleanKey]: color };
-
-    // If script text around selection had legacy bracket tags, clean them out
-    let updatedText = script.text;
-    if (selectedRange) {
-      const sel = script.text.substring(selectedRange.start, selectedRange.end);
-      if (sel.includes('[') || sel.includes(']')) {
-        const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
-        const before = script.text.substring(0, selectedRange.start);
-        const after = script.text.substring(selectedRange.end);
-        updatedText = `${before}${cleanInner}${after}`;
-      }
+    const nextTokenStyles = { ...(script.tokenStyles || {}) };
+    for (const t of matchingTokens) {
+      nextTokenStyles[t.tokenIndex] = {
+        ...(nextTokenStyles[t.tokenIndex] || {}),
+        color: color,
+        word: t.cleanWord,
+      };
     }
 
     onChange({
-      ...(updatedText !== script.text ? { text: updatedText } : {}),
-      wordColors: nextWordColors,
+      tokenStyles: nextTokenStyles,
     });
     setSelectedText('');
     setSelectedRange(null);
+    savedSelectionRef.current = null;
   };
 
-  // Apply ONLY highlight to the selected word/range (CLEAN: adds to customKeywords, NO code added to script.text!)
+  // Apply ONLY highlight to the selected word/range (PRECISION: highlights ONLY this selected instance!)
   const handleApplySelectedHighlight = (hlCol?: string) => {
-    if (!selectedText) return;
-    const cleanWord = selectedText.trim();
-    if (!cleanWord) return;
+    const matchingTokens = getSelectedMatchingTokens();
+    if (matchingTokens.length === 0) return;
 
-    const nextCustom = Array.from(new Set([...customKeywords, cleanWord]));
-    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== cleanPunctuation(cleanWord));
-
-    let updatedText = script.text;
-    if (selectedRange) {
-      const sel = script.text.substring(selectedRange.start, selectedRange.end);
-      if (sel.includes('[') || sel.includes(']')) {
-        const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
-        const before = script.text.substring(0, selectedRange.start);
-        const after = script.text.substring(selectedRange.end);
-        updatedText = `${before}${cleanInner}${after}`;
-      }
+    const targetHl = hlCol || highlightColor || '#ef4444';
+    const nextTokenStyles = { ...(script.tokenStyles || {}) };
+    for (const t of matchingTokens) {
+      nextTokenStyles[t.tokenIndex] = {
+        ...(nextTokenStyles[t.tokenIndex] || {}),
+        isHighlighted: true,
+        highlightColor: targetHl,
+        word: t.cleanWord,
+      };
     }
 
     onChange({
-      ...(updatedText !== script.text ? { text: updatedText } : {}),
-      customKeywords: nextCustom,
-      excludedKeywords: nextExcluded,
+      tokenStyles: nextTokenStyles,
       highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
-      ...(hlCol ? { highlightColor: hlCol } : {}),
     });
     setSelectedText('');
     setSelectedRange(null);
+    savedSelectionRef.current = null;
   };
 
-  // Apply BOTH text color AND highlight to the selected word/range (CLEAN: updates wordColors & customKeywords, NO code in script.text!)
+  // Apply BOTH text color AND highlight to the selected word/range (PRECISION: styles ONLY this selected instance!)
   const handleApplySelectedBoth = (txtColor: string, hlCol?: string) => {
-    if (!selectedText) return;
-    const cleanWord = selectedText.trim();
-    const cleanKey = cleanPunctuation(cleanWord);
-    if (!cleanKey) return;
+    const matchingTokens = getSelectedMatchingTokens();
+    if (matchingTokens.length === 0) return;
 
-    const nextWordColors = { ...(wordColors || {}), [cleanKey]: txtColor };
-    const nextCustom = Array.from(new Set([...customKeywords, cleanWord]));
-    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== cleanPunctuation(cleanWord));
-
-    let updatedText = script.text;
-    if (selectedRange) {
-      const sel = script.text.substring(selectedRange.start, selectedRange.end);
-      if (sel.includes('[') || sel.includes(']')) {
-        const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
-        const before = script.text.substring(0, selectedRange.start);
-        const after = script.text.substring(selectedRange.end);
-        updatedText = `${before}${cleanInner}${after}`;
-      }
+    const targetHl = hlCol || highlightColor || '#ef4444';
+    const nextTokenStyles = { ...(script.tokenStyles || {}) };
+    for (const t of matchingTokens) {
+      nextTokenStyles[t.tokenIndex] = {
+        ...(nextTokenStyles[t.tokenIndex] || {}),
+        color: txtColor,
+        isHighlighted: true,
+        highlightColor: targetHl,
+        word: t.cleanWord,
+      };
     }
 
     onChange({
-      ...(updatedText !== script.text ? { text: updatedText } : {}),
-      wordColors: nextWordColors,
-      customKeywords: nextCustom,
-      excludedKeywords: nextExcluded,
+      tokenStyles: nextTokenStyles,
       highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
-      ...(hlCol ? { highlightColor: hlCol } : {}),
     });
     setSelectedText('');
     setSelectedRange(null);
+    savedSelectionRef.current = null;
   };
 
   // Clear / reset formatting on the selected word/range
   const handleApplySelectedClear = () => {
-    if (!selectedText) return;
-    const cleanKey = cleanPunctuation(selectedText);
-    const nextWordColors = { ...(wordColors || {}) };
-    delete nextWordColors[cleanKey];
-    delete nextWordColors[selectedText.toLowerCase()];
-    const nextCustom = customKeywords.filter((k) => cleanPunctuation(k) !== cleanKey);
+    const matchingTokens = getSelectedMatchingTokens();
+    if (matchingTokens.length === 0) return;
 
-    let updatedText = script.text;
-    if (selectedRange) {
-      const sel = script.text.substring(selectedRange.start, selectedRange.end);
-      if (sel.includes('[') || sel.includes(']')) {
-        const cleanInner = sel.replace(/^\[(?:[a-zA-Z0-9#,\-_]+:)?/, '').replace(/\]$/, '').trim();
-        const before = script.text.substring(0, selectedRange.start);
-        const after = script.text.substring(selectedRange.end);
-        updatedText = `${before}${cleanInner}${after}`;
-      }
+    const nextTokenStyles = { ...(script.tokenStyles || {}) };
+    for (const t of matchingTokens) {
+      delete nextTokenStyles[t.tokenIndex];
     }
 
     onChange({
-      ...(updatedText !== script.text ? { text: updatedText } : {}),
-      wordColors: nextWordColors,
-      customKeywords: nextCustom,
+      tokenStyles: nextTokenStyles,
     });
     setSelectedText('');
     setSelectedRange(null);
+    savedSelectionRef.current = null;
   };
 
   // Quick highlight for selected text
   const handleWrapBrackets = () => {
-    if (!selectedText) return;
     handleApplySelectedHighlight();
   };
 
-  // Token-specific actions: Modify ONLY the clicked token WITHOUT adding any code/tag to script.text!
+  // Token-specific actions: Modify ONLY the clicked token index (PRECISION: other same words stay untouched!)
   const handleTokenColor = (token: ScriptToken, color: string) => {
-    const cleanKey = cleanPunctuation(token.cleanWord);
-    if (!cleanKey) return;
-    const nextWordColors = { ...(wordColors || {}), [cleanKey]: color };
-
-    // If token in text was formatted with legacy bracket syntax, clean it out so text has NO brackets!
-    let updatedText = script.text;
-    if (token.raw !== token.cleanWord && (token.raw.includes('[') || token.raw.includes(']'))) {
-      const before = script.text.substring(0, token.charStart);
-      const after = script.text.substring(token.charEnd);
-      updatedText = `${before}${token.cleanWord}${after}`;
-    }
+    const nextTokenStyles = { ...(script.tokenStyles || {}) };
+    nextTokenStyles[token.tokenIndex] = {
+      ...(nextTokenStyles[token.tokenIndex] || {}),
+      color: color,
+      word: token.cleanWord,
+    };
 
     onChange({
-      ...(updatedText !== script.text ? { text: updatedText } : {}),
-      wordColors: nextWordColors,
+      tokenStyles: nextTokenStyles,
     });
   };
 
   const handleTokenHighlight = (token: ScriptToken, hlCol?: string) => {
-    const cleanWord = token.cleanWord.trim();
-    if (!cleanWord) return;
-    const nextCustom = Array.from(new Set([...customKeywords, cleanWord]));
-    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== cleanPunctuation(cleanWord));
-
-    let updatedText = script.text;
-    if (token.raw !== token.cleanWord && (token.raw.includes('[') || token.raw.includes(']'))) {
-      const before = script.text.substring(0, token.charStart);
-      const after = script.text.substring(token.charEnd);
-      updatedText = `${before}${token.cleanWord}${after}`;
-    }
+    const targetHl = hlCol || highlightColor || '#ef4444';
+    const nextTokenStyles = { ...(script.tokenStyles || {}) };
+    nextTokenStyles[token.tokenIndex] = {
+      ...(nextTokenStyles[token.tokenIndex] || {}),
+      isHighlighted: true,
+      highlightColor: targetHl,
+      word: token.cleanWord,
+    };
 
     onChange({
-      ...(updatedText !== script.text ? { text: updatedText } : {}),
-      customKeywords: nextCustom,
-      excludedKeywords: nextExcluded,
+      tokenStyles: nextTokenStyles,
       highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
-      ...(hlCol ? { highlightColor: hlCol } : {}),
     });
   };
 
   const handleTokenBoth = (token: ScriptToken, txtColor: string, hlCol?: string) => {
-    const cleanWord = token.cleanWord.trim();
-    const cleanKey = cleanPunctuation(cleanWord);
-    if (!cleanKey) return;
-
-    const nextWordColors = { ...(wordColors || {}), [cleanKey]: txtColor };
-    const nextCustom = Array.from(new Set([...customKeywords, cleanWord]));
-    const nextExcluded = (script.excludedKeywords || []).filter((e) => cleanPunctuation(e) !== cleanPunctuation(cleanWord));
-
-    let updatedText = script.text;
-    if (token.raw !== token.cleanWord && (token.raw.includes('[') || token.raw.includes(']'))) {
-      const before = script.text.substring(0, token.charStart);
-      const after = script.text.substring(token.charEnd);
-      updatedText = `${before}${token.cleanWord}${after}`;
-    }
+    const targetHl = hlCol || highlightColor || '#ef4444';
+    const nextTokenStyles = { ...(script.tokenStyles || {}) };
+    nextTokenStyles[token.tokenIndex] = {
+      ...(nextTokenStyles[token.tokenIndex] || {}),
+      color: txtColor,
+      isHighlighted: true,
+      highlightColor: targetHl,
+      word: token.cleanWord,
+    };
 
     onChange({
-      ...(updatedText !== script.text ? { text: updatedText } : {}),
-      wordColors: nextWordColors,
-      customKeywords: nextCustom,
-      excludedKeywords: nextExcluded,
+      tokenStyles: nextTokenStyles,
       highlightMode: highlightMode === 'none' ? 'manual-only' : highlightMode,
-      ...(hlCol ? { highlightColor: hlCol } : {}),
     });
   };
 
   const handleTokenClear = (token: ScriptToken) => {
-    const cleanKey = cleanPunctuation(token.cleanWord);
-    const nextWordColors = { ...(wordColors || {}) };
-    delete nextWordColors[cleanKey];
-    delete nextWordColors[token.cleanWord.toLowerCase()];
-    const nextCustom = customKeywords.filter((k) => cleanPunctuation(k) !== cleanKey);
-
-    let updatedText = script.text;
-    if (token.raw !== token.cleanWord && (token.raw.includes('[') || token.raw.includes(']'))) {
-      const before = script.text.substring(0, token.charStart);
-      const after = script.text.substring(token.charEnd);
-      updatedText = `${before}${token.cleanWord}${after}`;
-    }
+    const nextTokenStyles = { ...(script.tokenStyles || {}) };
+    delete nextTokenStyles[token.tokenIndex];
 
     onChange({
-      ...(updatedText !== script.text ? { text: updatedText } : {}),
-      wordColors: nextWordColors,
-      customKeywords: nextCustom,
+      tokenStyles: nextTokenStyles,
     });
     setActiveTokenIndex(null);
   };
@@ -792,6 +756,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                     <button
                       key={p.color}
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => handleApplySelectedColor(p.color)}
                       className="w-5.5 h-5.5 rounded-full transition-transform hover:scale-120 active:scale-95 border border-white/20 hover:border-white cursor-pointer shadow-sm flex items-center justify-center"
                       style={{ backgroundColor: p.color }}
@@ -801,6 +766,9 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                   <input
                     type="color"
                     defaultValue="#facc15"
+                    onFocus={() => {
+                      if (selectedRange) savedSelectionRef.current = { ...selectedRange, text: selectedText };
+                    }}
                     onChange={(e) => handleApplySelectedColor(e.target.value)}
                     className="w-5.5 h-5.5 rounded-full border border-neutral-700 bg-transparent cursor-pointer ml-0.5"
                     title="Custom color for this selected word"
@@ -819,6 +787,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                     <button
                       key={col.color}
                       type="button"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => handleApplySelectedHighlight(col.color)}
                       className="px-2 py-0.5 rounded text-[11px] font-semibold transition-transform hover:scale-105 active:scale-95 cursor-pointer border flex items-center gap-1"
                       style={{ backgroundColor: `${col.color}25`, color: col.color, borderColor: `${col.color}60` }}
@@ -831,6 +800,9 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                   <input
                     type="color"
                     value={highlightColor}
+                    onFocus={() => {
+                      if (selectedRange) savedSelectionRef.current = { ...selectedRange, text: selectedText };
+                    }}
                     onChange={(e) => handleApplySelectedHighlight(e.target.value)}
                     className="w-5.5 h-5.5 rounded-full border border-neutral-700 bg-transparent cursor-pointer ml-0.5"
                     title="Custom highlight color"
@@ -865,6 +837,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                   </div>
                   <button
                     type="button"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleApplySelectedBoth(bothPickerTextCol, bothPickerHlCol)}
                     className="px-2.5 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-[11px] rounded transition-colors cursor-pointer ml-1"
                     title="Apply both text color and highlight to this word"
@@ -876,6 +849,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={handleApplySelectedClear}
                     className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-[11px] rounded border border-neutral-700 cursor-pointer transition-colors"
                     title="Remove formatting from selected text"
@@ -884,6 +858,7 @@ export const ScriptTab: React.FC<ScriptTabProps> = ({
                   </button>
                   <button
                     type="button"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={handleWrapBrackets}
                     className="px-2 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[11px] font-semibold rounded border border-neutral-700 transition-colors cursor-pointer"
                     title="Highlight selected text"

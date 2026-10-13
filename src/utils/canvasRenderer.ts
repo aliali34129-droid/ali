@@ -1,4 +1,4 @@
-import { VideoProject } from '../types';
+import { VideoProject, WordTokenStyle } from '../types';
 import { getActiveHighlights, isWordKeyword, cleanPunctuation } from './keywordExtractor';
 import { getCanvasFontString } from './textStyles';
 
@@ -83,13 +83,15 @@ export function wrapFormattedWords(
   rawText: string,
   maxWidth: number,
   activeKeywords: string[],
-  wordColors?: Record<string, string>
+  wordColors?: Record<string, string>,
+  tokenStyles?: Record<number, WordTokenStyle>
 ): RenderLine[] {
   if (!rawText) return [];
 
   const roundedMaxWidth = Math.round(maxWidth);
   const colorsKey = wordColors ? Object.entries(wordColors).map(([k, v]) => `${k}:${v}`).sort().join(';') : '';
-  const cacheKey = `${ctx.font}_${roundedMaxWidth}_${activeKeywords.join(',')}_${colorsKey}__${rawText}`;
+  const tokenStylesKey = tokenStyles ? Object.entries(tokenStyles).map(([k, v]) => `${k}:${v?.color || ''},${v?.isHighlighted ? '1' : '0'},${v?.highlightColor || ''}`).sort().join(';') : '';
+  const cacheKey = `${ctx.font}_${roundedMaxWidth}_${activeKeywords.join(',')}_${colorsKey}_${tokenStylesKey}__${rawText}`;
   const cached = wrapCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -101,6 +103,7 @@ export function wrapFormattedWords(
   const safeMaxWidth = Math.max(80, roundedMaxWidth - 8);
 
   const paragraphs = rawText.split('\n');
+  let globalWordIndex = 0;
 
   for (const paragraph of paragraphs) {
     if (paragraph.trim() === '') {
@@ -119,6 +122,7 @@ export function wrapFormattedWords(
 
     for (let i = 0; i < rawTokens.length; i++) {
       let rawToken = rawTokens[i];
+      const currentTokenIdx = globalWordIndex++;
       let wordHighlighted = false;
       let wordColor: string | undefined = undefined;
       let wordHlColor: string | undefined = undefined;
@@ -217,7 +221,21 @@ export function wrapFormattedWords(
         }
       }
 
-      // Check custom word colors from wordColors map (whether inside or outside brackets)
+      // 1. Exact token index styling (PRECISION: styles ONLY this exact selected word instance!)
+      const tokenStyle = tokenStyles ? (tokenStyles[currentTokenIdx] || tokenStyles[String(currentTokenIdx) as any]) : undefined;
+      if (tokenStyle) {
+        if (tokenStyle.color) {
+          wordColor = tokenStyle.color;
+        }
+        if (tokenStyle.isHighlighted !== undefined) {
+          wordHighlighted = tokenStyle.isHighlighted;
+          if (tokenStyle.highlightColor) {
+            wordHlColor = tokenStyle.highlightColor;
+          }
+        }
+      }
+
+      // 2. Check custom word colors from wordColors map (whether inside or outside brackets)
       if (!wordColor && wordColors) {
         const cleanLower = cleanPunctuation(rawToken).toLowerCase();
         const rawLower = rawToken.toLowerCase();
@@ -583,7 +601,8 @@ export function renderCanvasFrame(
     processedText,
     maxTextLineWidth,
     activeHighlights,
-    project.script.wordColors
+    project.script.wordColors,
+    project.script.tokenStyles
   );
   const calculatedLineHeight = adjustedFontSize * project.script.lineHeight;
   const extraHeight = Math.round((project.script.boxHeightExtra || 0) * scaleRatio);
@@ -910,7 +929,8 @@ export function getCanvasLayerBounds(
       processedText,
       maxTextLineWidth,
       activeKeywords,
-      project.script.wordColors
+      project.script.wordColors,
+      project.script.tokenStyles
     );
     lineCount = Math.max(1, lines.length);
   }
